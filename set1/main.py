@@ -1,49 +1,15 @@
 import numpy as np
 import scipy as sp
 import matplotlib.pyplot as plt
-import os
-import pickle
+import utility
 
 LSPACE = (8, 10, 12, 14)
 HSPACE = np.linspace(-2, 2, 10)
-p4_1_fnames = ['./data/dense_gnd_eng_open', './data/dense_gnd_eng_loop']
+CACHE_DIR = './data/'
 
 
-def load_or_make(fname, make_func, *args, **kwargs):
-    multi = fname.endswith('.npz')
-    if os.path.isfile(fname):
-        file = np.load(fname)
-        if multi:
-            data = dict(file)
-            file.close()
-        else:
-            data = file
-        return data
-    else:
-        data = make_func(*args, **kwargs)
-        if multi:
-            np.savez(fname, **data)
-        else:
-            np.save(fname, data)
-        return data
-
-
-def load_or_make_pkl(fname, make_func, *args, **kwargs):
-    if os.path.isfile(fname):
-        with open(fname, 'rb') as file:
-            data = pickle.load(file)
-        return data
-    else:
-        data = make_func(*args, **kwargs)
-        with open(fname, 'wb') as file:
-            pickle.dump(data, file)
-        return data
-
-
-def pkl_cache()
-
-
-def make_H(L, hspace=HSPACE):
+@utility.cache('npz', CACHE_DIR + 'dense_H')
+def make_dense_H(L, hspace=HSPACE, note=None):
     dim = 2 ** L
     H_open = np.zeros((len(hspace), dim, dim))
     H_loop = np.zeros((len(hspace), dim, dim))
@@ -56,7 +22,8 @@ def make_H(L, hspace=HSPACE):
     return {'H_open': H_open, 'H_loop': H_loop}
 
 
-def make_sparse_H(L, hspace=HSPACE):
+@utility.cache('pkl', CACHE_DIR + 'sparse_H')
+def make_sparse_H(L, hspace=HSPACE, note=None):
     dim = 2 ** L
     output = []
     for i, h in enumerate(hspace):
@@ -76,16 +43,20 @@ def make_sparse_H(L, hspace=HSPACE):
     return output
 
 
-def dense_evals(H, hspace=HSPACE):
-    gnd_eng = []
+@utility.cache('npz', CACHE_DIR + 'dense_eigs')
+def dense_eigs(H, hspace=HSPACE, note=None):
+    all_evals = []
+    all_evecs = []
     for i in range(len(hspace)):
         print(f'finding dense evals: L={np.log2(H[i].shape[0])}, h={hspace[i]}')
-        evals = sp.linalg.eigvals(H[i])
-        gnd_eng.append(np.min(evals))
-    return gnd_eng
+        evals, evecs = sp.linalg.eig(H[i])
+        all_evals.append(evals)
+        all_evecs.append(evecs)
+    return {'evals': np.array(all_evals), 'evecs': np.array(all_evecs)}
 
 
-def sparse_eigs(H, hspace=HSPACE):
+@utility.cache('npz', CACHE_DIR + 'sparse_eigs')
+def sparse_eigs(H, hspace=HSPACE, note=None):
     all_evals = []
     all_evecs = []
     for i in range(len(hspace)):
@@ -100,24 +71,12 @@ def sparse_eigs(H, hspace=HSPACE):
 def p4_1(Lspace=LSPACE):
     plt.figure()
     for C, L in enumerate(Lspace):
-        if L <= 12:
-            data = load_or_make(f'./data/dense_H_L{L}.npz', make_H, L)
-            H_open = data['H_open']
-            H_loop = data['H_loop']
-            gnd_eng_open = load_or_make(f'./data/dense_gnd_eng_open_L{L}.npy', dense_evals, H_open)
-            gnd_eng_loop = load_or_make(f'./data/dense_gnd_eng_loop_L{L}.npy', dense_evals, H_loop)
-        else:
-            gnd_eng_loop = []
-            gnd_eng_open = []
-            for i, h in enumerate(HSPACE):
-                temp_hspace = np.array([h])
-                data = make_H(L, hspace=temp_hspace)
-                H_open = data['H_open']
-                H_loop = data['H_loop']
-                gnd_eng_open.append(load_or_make(f'./data/dense_gnd_eng_open_L{L}_h{i}.npy',
-                                                 dense_evals, H_open, temp_hspace)[0])
-                gnd_eng_loop.append(load_or_make(f'./data/dense_gnd_eng_loop_L{L}_h{i}.npy',
-                                                 dense_evals, H_loop, temp_hspace)[0])
+        data = make_dense_H(L, note=f'L{L}')
+        H_open = data['H_open']
+        H_loop = data['H_loop']
+        gnd_eng_open = np.min(dense_eigs(H_open, note=f'open_L{L}')['evals'], axis=-1)
+        gnd_eng_loop = np.min(dense_eigs(H_loop, note=f'loop_L{L}')['evals'], axis=-1)
+
         plt.plot(HSPACE, gnd_eng_open, label=rf'$L={L}$', color=f'C{C}')
         plt.plot(HSPACE, gnd_eng_loop, color=f'C{C}', linestyle='dotted')
     plt.legend()
@@ -126,8 +85,8 @@ def p4_1(Lspace=LSPACE):
 def p4_2(Lspace=LSPACE):
     plt.figure()
     for C, L in enumerate(Lspace):
-        H = load_or_make_pkl(f'./data/sparse_H_L{L}.pkl', make_sparse_H, L)
-        data = load_or_make(f'./data/sparse_gnd_eng_open_L{L}.npz', sparse_eigs, H)
+        H = make_sparse_H(L, note=f'L{L}')
+        data = sparse_eigs(H, note=f'L{L}')
         evals = data['evals']
         evecs = data['evecs']
         gnd_eng = np.min(evals, axis=-1)
