@@ -1,7 +1,11 @@
+import matplotlib
 import numpy as np
 import scipy as sp
+import matplotlib
 import matplotlib.pyplot as plt
 import utility
+
+plt.rcParams['font.size'] = 14
 
 LSPACE = (8, 10, 12, 14)
 HSPACE = np.linspace(-2, 2, 10)
@@ -71,35 +75,66 @@ def sparse_eigs(H, hspace=HSPACE, note=None):
 def p4_1(Lspace=LSPACE):
     plt.figure()
     for C, L in enumerate(Lspace):
-        data = make_dense_H(L, note=f'L{L}')
-        H_open = data['H_open']
-        H_loop = data['H_loop']
-        gnd_eng_open = np.min(dense_eigs(H_open, note=f'open_L{L}')['evals'], axis=-1)
-        gnd_eng_loop = np.min(dense_eigs(H_loop, note=f'loop_L{L}')['evals'], axis=-1)
+        if L <= 12:
+            data = make_dense_H(L, note=f'L{L}')
+            H_open = data['H_open']
+            H_loop = data['H_loop']
+            gnd_eng_open = np.min(dense_eigs(H_open, note=f'open_L{L}')['evals'], axis=-1)
+            gnd_eng_loop = np.min(dense_eigs(H_loop, note=f'loop_L{L}')['evals'], axis=-1)
+        else:
+            gnd_eng_open = []
+            gnd_eng_loop = []
+            for i, h in enumerate(HSPACE):
+                fake_hspace = np.array([h])
+                data = make_dense_H(L, hspace=fake_hspace, note=f'L{L}_h{round(h, 3)}')
+                H_open = data['H_open']
+                H_loop = data['H_loop']
+                gnd_eng_open.append(np.min(dense_eigs(H_open, hspace=fake_hspace, note=f'open_L{L}_h{round(h, 3)}')['evals'], axis=-1)[0])
+                gnd_eng_loop.append(np.min(dense_eigs(H_loop, hspace=fake_hspace, note=f'loop_L{L}_h{round(h, 3)}')['evals'], axis=-1)[0])
 
         plt.plot(HSPACE, gnd_eng_open, label=rf'$L={L}$', color=f'C{C}')
         plt.plot(HSPACE, gnd_eng_loop, color=f'C{C}', linestyle='dotted')
+    # plt.title('Ground State Energy - Dense Method')
+    plt.xlabel(r'$h/J$')
+    plt.ylabel(r'$E_0/J$')
+    plt.tight_layout()
     plt.legend()
 
 
 def p4_2(Lspace=LSPACE):
-    plt.figure()
+    fig, axes = plt.subplots(2, 2, sharex=True, sharey=True, figsize=(10, 10))
+    # figs = [plt.figure() for _ in range(4)]
+    # axes = [fig.subplots() for fig in figs]
+
     for C, L in enumerate(Lspace):
         H = make_sparse_H(L, note=f'L{L}')
         data = sparse_eigs(H, note=f'L{L}')
         evals = data['evals']
         evecs = data['evecs']
-        gnd_eng = np.min(evals, axis=-1)
 
-        plt.plot(HSPACE, gnd_eng, label=rf'L={L}')
-    plt.legend()
+        if L in np.arange(8, 21, 2):
+            for i, ax in enumerate(axes.flatten()):
+                ax.plot(HSPACE, evals[:, i], label=rf'L={L}')
+
+    # fig.suptitle('Ground and Excited State Energies - Sparse Method')
+    for i, ax in enumerate(axes.flatten()):
+        ax.set_title(rf'$|{i}\rangle$')
+        ax.set_xlabel(r'$h/J$')
+        ax.set_ylabel(rf'$E_{i}/J$')
+        handles, labels = ax.get_legend_handles_labels()
+    fig.legend(handles, labels, loc='center left', bbox_to_anchor=(1, 0.5))
+    plt.tight_layout()
 
 
 if __name__ == '__main__':
     with open('output.txt', 'w') as output:
+        p4_1_Lspace = np.array([8, 10, 12])
+        p4_2_Lspace = np.arange(5, 21)
+
         print('4.1.' + '-' * 50, file=output)
-        p4_1(Lspace=(8, 10, 12, 14))
+        p4_1(Lspace=p4_1_Lspace)
 
         print('4.2.' + '-' * 50, file=output)
-        p4_2(Lspace=(8, 10, 12, 14, 16))
+        p4_2(Lspace=p4_2_Lspace)
+
     plt.show()
