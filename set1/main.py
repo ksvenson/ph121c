@@ -8,8 +8,10 @@ import utility
 plt.rcParams['font.size'] = 14
 
 LSPACE = (8, 10, 12, 14)
-HSPACE = np.linspace(-2, 2, 10)
+HSPACE = np.linspace(-2, 2, 17)
 CACHE_DIR = './data/'
+FIGS_DIR = './figs/'
+LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
 
 
 @utility.cache('npz', CACHE_DIR + 'dense_H')
@@ -22,29 +24,34 @@ def make_dense_H(L, hspace=HSPACE, note=None):
         for flip in range(0, L):
             H_open[:, i ^ (1 << flip), i] -= hspace
         H_loop[:, :, i] = H_open[:, :, i]
-        H_loop[:, i, i] += 2 * ((i ^ (i >> L - 1)) % 2) - 1
-    return {'H_open': H_open, 'H_loop': H_loop}
+        H_loop[:, i, i] += 2 * ((i ^ (i >> (L - 1))) % 2) - 1
+    return {'open': H_open, 'loop': H_loop}
 
 
 @utility.cache('pkl', CACHE_DIR + 'sparse_H')
 def make_sparse_H(L, hspace=HSPACE, note=None):
     dim = 2 ** L
-    output = []
+    H_open = []
+    H_loop = []
     for i, h in enumerate(hspace):
         print(f'making sparse H: L={L}, h={h}')
         row = []
         col = []
-        data = []
+        data_open = []
+        data_loop = []
         for j in range(dim):
             row.append(j)
             col.append(j)
-            data.append(2 * ((j & ~(1 << L-1)) ^ (j >> 1)).bit_count() - (L-1))
+            data_open.append(2 * ((j & ~(1 << L-1)) ^ (j >> 1)).bit_count() - (L-1))
+            data_loop.append(data_open[-1] + 2 * ((j ^ (j >> (L - 1))) % 2) - 1)
             for flip in range(0, L):
                 row.append(j ^ (1 << flip))
                 col.append(j)
-                data.append(-h)
-        output.append(sp.sparse.csr_matrix((data, (row, col)), shape=(dim, dim)))
-    return output
+                data_open.append(-h)
+                data_loop.append(-h)
+        H_open.append(sp.sparse.csr_matrix((data_open, (row, col)), shape=(dim, dim)))
+        H_loop.append(sp.sparse.csr_matrix((data_loop, (row, col)), shape=(dim, dim)))
+    return {'open': H_open, 'loop': H_loop}
 
 
 @utility.cache('npz', CACHE_DIR + 'dense_eigs')
@@ -75,55 +82,65 @@ def sparse_eigs(H, hspace=HSPACE, note=None):
 def p4_1(Lspace=LSPACE):
     plt.figure()
     for C, L in enumerate(Lspace):
+        gnd_eng = {}
         if L <= 12:
-            data = make_dense_H(L, note=f'L{L}')
-            H_open = data['H_open']
-            H_loop = data['H_loop']
-            gnd_eng_open = np.min(dense_eigs(H_open, note=f'open_L{L}')['evals'], axis=-1)
-            gnd_eng_loop = np.min(dense_eigs(H_loop, note=f'loop_L{L}')['evals'], axis=-1)
+            H = make_dense_H(L, note=f'L{L}')
+            for bdry in ('open', 'loop'):
+                gnd_eng[bdry] = np.min(dense_eigs(H[bdry], note=f'{bdry}_L{L}')['evals'], axis=-1)
         else:
-            gnd_eng_open = []
-            gnd_eng_loop = []
             for i, h in enumerate(HSPACE):
                 fake_hspace = np.array([h])
-                data = make_dense_H(L, hspace=fake_hspace, note=f'L{L}_h{round(h, 3)}')
-                H_open = data['H_open']
-                H_loop = data['H_loop']
-                gnd_eng_open.append(np.min(dense_eigs(H_open, hspace=fake_hspace, note=f'open_L{L}_h{round(h, 3)}')['evals'], axis=-1)[0])
-                gnd_eng_loop.append(np.min(dense_eigs(H_loop, hspace=fake_hspace, note=f'loop_L{L}_h{round(h, 3)}')['evals'], axis=-1)[0])
+                H = make_dense_H(L, hspace=fake_hspace, note=f'L{L}_h{round(h, 3)}')
+                for bdry in ('open', 'loop'):
+                    gnd_eng[bdry] = np.min(dense_eigs(H[bdry], hspace=fake_hspace, note=f'{bdry}_L{L}_h{round(h, 3)}')['evals'], axis=-1)[0]
 
-        plt.plot(HSPACE, gnd_eng_open, label=rf'$L={L}$', color=f'C{C}')
-        plt.plot(HSPACE, gnd_eng_loop, color=f'C{C}', linestyle='dotted')
-    # plt.title('Ground State Energy - Dense Method')
+        plt.plot(HSPACE, gnd_eng['open'], label=rf'$L={L}$', color=f'C{C}')
+        plt.plot(HSPACE, gnd_eng['open'], color=f'C{C}', linestyle='dotted')
     plt.xlabel(r'$h/J$')
     plt.ylabel(r'$E_0/J$')
-    plt.tight_layout()
-    plt.legend()
+    plt.legend(**LEGEND_OPTIONS)
+    plt.savefig(FIGS_DIR + 'p4_1.png', bbox_inches='tight')
 
 
 def p4_2(Lspace=LSPACE):
     fig, axes = plt.subplots(2, 2, sharex=True, sharey=True, figsize=(10, 10))
-    # figs = [plt.figure() for _ in range(4)]
-    # axes = [fig.subplots() for fig in figs]
+    fig_comp, ax_comp = plt.subplots()
 
     for C, L in enumerate(Lspace):
         H = make_sparse_H(L, note=f'L{L}')
-        data = sparse_eigs(H, note=f'L{L}')
-        evals = data['evals']
-        evecs = data['evecs']
+        evals = {}
+        evecs = {}
+        for bdry in ('open', 'loop'):
+            data = sparse_eigs(H_open, note=f'L{L}')
+            evals[bdry] = data['evals']
+            evecs[bdry] = data['evecs']
 
         if L in np.arange(8, 21, 2):
             for i, ax in enumerate(axes.flatten()):
                 ax.plot(HSPACE, evals[:, i], label=rf'L={L}')
+        if L in p4_1_Lspace:
+            H_open = make_dense_H(L, note=f'L{L}')['H_open']
+            dense_evals = np.min(dense_eigs(H_open, note=f'open_L{L}')['evals'], axis=-1)
+            ax_comp.plot(HSPACE, np.abs(evals[:, 0] - dense_evals), label=rf'L={L}')
+            ax_comp.set_yscale('log')
 
-    # fig.suptitle('Ground and Excited State Energies - Sparse Method')
     for i, ax in enumerate(axes.flatten()):
         ax.set_title(rf'$|{i}\rangle$')
         ax.set_xlabel(r'$h/J$')
         ax.set_ylabel(rf'$E_{i}/J$')
         handles, labels = ax.get_legend_handles_labels()
-    fig.legend(handles, labels, loc='center left', bbox_to_anchor=(1, 0.5))
-    plt.tight_layout()
+    fig.legend(handles, labels, **LEGEND_OPTIONS)
+    fig.savefig(FIGS_DIR + 'p4_2_evals.png', bbox_inches='tight')
+
+    ax_comp.set_xlabel(r'$h/J$')
+    ax_comp.set_ylabel(r'Difference ($J$)')
+    fig_comp.legend(**LEGEND_OPTIONS)
+    fig_comp.savefig(FIGS_DIR + 'p4_2_comp.png', bbox_inches='tight')
+
+
+def p4_3(Lspace=LSPACE):
+    f_h = 0.25
+    p_h = 1.75
 
 
 if __name__ == '__main__':
@@ -137,4 +154,4 @@ if __name__ == '__main__':
         print('4.2.' + '-' * 50, file=output)
         p4_2(Lspace=p4_2_Lspace)
 
-    plt.show()
+    # plt.show()
