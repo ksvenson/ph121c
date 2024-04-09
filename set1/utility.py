@@ -19,7 +19,7 @@ def cache(method: cache_type, base):
                     with np.load(fname) as file:
                         data = dict(file)
                 elif method == 'npz':
-                    data = np.load(fname)
+                    data = dict(np.load(fname))
                 elif method == 'pkl':
                     with open(fname, 'rb') as file:
                         data = pickle.load(file)

@@ -1,7 +1,5 @@
-import matplotlib
 import numpy as np
 import scipy as sp
-import matplotlib
 import matplotlib.pyplot as plt
 import utility
 
@@ -95,7 +93,7 @@ def p4_1(Lspace=LSPACE):
                     gnd_eng[bdry] = np.min(dense_eigs(H[bdry], hspace=fake_hspace, note=f'{bdry}_L{L}_h{round(h, 3)}')['evals'], axis=-1)[0]
 
         plt.plot(HSPACE, gnd_eng['open'], label=rf'$L={L}$', color=f'C{C}')
-        plt.plot(HSPACE, gnd_eng['open'], color=f'C{C}', linestyle='dotted')
+        plt.plot(HSPACE, gnd_eng['loop'], color=f'C{C}', linestyle='dotted')
     plt.xlabel(r'$h/J$')
     plt.ylabel(r'$E_0/J$')
     plt.legend(**LEGEND_OPTIONS)
@@ -104,38 +102,42 @@ def p4_1(Lspace=LSPACE):
 
 def p4_2(Lspace=LSPACE):
     fig, axes = plt.subplots(2, 2, sharex=True, sharey=True, figsize=(10, 10))
-    fig_comp, ax_comp = plt.subplots()
+    fig_comp = {}
+    ax_comp = {}
+    for bdry in ('open', 'loop'):
+        fig_comp[bdry], ax_comp[bdry] = plt.subplots()
 
     for C, L in enumerate(Lspace):
         H = make_sparse_H(L, note=f'L{L}')
         evals = {}
         evecs = {}
         for bdry in ('open', 'loop'):
-            data = sparse_eigs(H_open, note=f'L{L}')
+            data = sparse_eigs(H[bdry], note=f'{bdry}_L{L}')
             evals[bdry] = data['evals']
             evecs[bdry] = data['evecs']
 
         if L in np.arange(8, 21, 2):
             for i, ax in enumerate(axes.flatten()):
-                ax.plot(HSPACE, evals[:, i], label=rf'L={L}')
-        if L in p4_1_Lspace:
-            H_open = make_dense_H(L, note=f'L{L}')['H_open']
-            dense_evals = np.min(dense_eigs(H_open, note=f'open_L{L}')['evals'], axis=-1)
-            ax_comp.plot(HSPACE, np.abs(evals[:, 0] - dense_evals), label=rf'L={L}')
-            ax_comp.set_yscale('log')
-
+                ax.plot(HSPACE, evals['open'][:, i], label=rf'L={L}', color=f'C{C}')
+                ax.plot(HSPACE, evals['loop'][:, i], color=f'C{C}', linestyle='dotted')
+        for bdry in ('open', 'loop'):
+            if L in p4_1_Lspace:
+                dense_H = make_dense_H(L, note=f'L{L}')
+                dense_evals = np.min(dense_eigs(dense_H[bdry], note=f'{bdry}_L{L}')['evals'], axis=-1)
+                ax_comp[bdry].plot(HSPACE, np.abs(evals[bdry][:, 0] - dense_evals), label=rf'L={L}')
+                ax_comp[bdry].set_yscale('log')
     for i, ax in enumerate(axes.flatten()):
         ax.set_title(rf'$|{i}\rangle$')
         ax.set_xlabel(r'$h/J$')
         ax.set_ylabel(rf'$E_{i}/J$')
         handles, labels = ax.get_legend_handles_labels()
     fig.legend(handles, labels, **LEGEND_OPTIONS)
-    fig.savefig(FIGS_DIR + 'p4_2_evals.png', bbox_inches='tight')
-
-    ax_comp.set_xlabel(r'$h/J$')
-    ax_comp.set_ylabel(r'Difference ($J$)')
-    fig_comp.legend(**LEGEND_OPTIONS)
-    fig_comp.savefig(FIGS_DIR + 'p4_2_comp.png', bbox_inches='tight')
+    fig.savefig(FIGS_DIR + f'p4_2_evals.png', bbox_inches='tight')
+    for bdry in ('open', 'loop'):
+        ax_comp[bdry].set_xlabel(r'$h/J$')
+        ax_comp[bdry].set_ylabel(r'Difference ($J$)')
+        fig_comp[bdry].legend(**LEGEND_OPTIONS)
+        fig_comp[bdry].savefig(FIGS_DIR + f'p4_2_{bdry}_comp.png', bbox_inches='tight')
 
 
 def p4_3(Lspace=LSPACE):
