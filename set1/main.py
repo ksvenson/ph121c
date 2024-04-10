@@ -6,10 +6,11 @@ import utility
 plt.rcParams['font.size'] = 14
 
 LSPACE = (8, 10, 12, 14)
-HSPACE = np.linspace(-2, 2, 17)
+HSPACE = np.linspace(0, 2, 17)
 CACHE_DIR = './data/'
 FIGS_DIR = './figs/'
 LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
+afew = 3
 
 
 @utility.cache('npz', CACHE_DIR + 'dense_H')
@@ -70,7 +71,7 @@ def sparse_eigs(H, hspace=HSPACE, note=None):
     all_evecs = []
     for i in range(len(hspace)):
         print(f'finding sparse evals: L={np.log2(H[i].shape[0])}, h={hspace[i]}')
-        evals, evecs = sp.sparse.linalg.eigs(H[i], k=4, which='SR')
+        evals, evecs = sp.sparse.linalg.eigs(H[i], k=1+afew, which='SR')
         all_evals.append(evals)
         all_evecs.append(evecs)
     return {'evals': np.array(all_evals), 'evecs': np.array(all_evecs)}
@@ -96,7 +97,7 @@ def p4_1(Lspace=LSPACE):
         plt.plot(HSPACE, gnd_eng['loop'], color=f'C{C}', linestyle='dotted')
     plt.xlabel(r'$h/J$')
     plt.ylabel(r'$E_0/J$')
-    plt.legend(**LEGEND_OPTIONS)
+    plt.legend()
     plt.savefig(FIGS_DIR + 'p4_1.png', bbox_inches='tight')
 
 
@@ -106,24 +107,24 @@ def p4_2(Lspace=LSPACE):
     ax_comp = {}
     for bdry in ('open', 'loop'):
         fig_comp[bdry], ax_comp[bdry] = plt.subplots()
-
-    for C, L in enumerate(Lspace):
+    color = 0
+    for L in Lspace:
         H = make_sparse_H(L, note=f'L{L}')
         evals = {}
         evecs = {}
-        for bdry in ('open', 'loop'):
+        for bdry in H:
             data = sparse_eigs(H[bdry], note=f'{bdry}_L{L}')
             evals[bdry] = data['evals']
             evecs[bdry] = data['evecs']
 
         if L in np.arange(8, 21, 2):
             for i, ax in enumerate(axes.flatten()):
-                ax.plot(HSPACE, evals['open'][:, i], label=rf'L={L}', color=f'C{C}')
-                ax.plot(HSPACE, evals['loop'][:, i], color=f'C{C}', linestyle='dotted')
-        for bdry in ('open', 'loop'):
+                ax.plot(HSPACE, evals['open'][:, i], label=rf'L={L}', color=f'C{color}')
+                ax.plot(HSPACE, evals['loop'][:, i], color=f'C{color}', linestyle='dotted')
+            color += 1
+        for bdry in fig_comp:
             if L in p4_1_Lspace:
-                dense_H = make_dense_H(L, note=f'L{L}')
-                dense_evals = np.min(dense_eigs(dense_H[bdry], note=f'{bdry}_L{L}')['evals'], axis=-1)
+                dense_evals = np.min(np.load(CACHE_DIR + f'dense_eigs_{bdry}_L{L}.npz')['evals'], axis=-1)
                 ax_comp[bdry].plot(HSPACE, np.abs(evals[bdry][:, 0] - dense_evals), label=rf'L={L}')
                 ax_comp[bdry].set_yscale('log')
     for i, ax in enumerate(axes.flatten()):
@@ -133,7 +134,7 @@ def p4_2(Lspace=LSPACE):
         handles, labels = ax.get_legend_handles_labels()
     fig.legend(handles, labels, **LEGEND_OPTIONS)
     fig.savefig(FIGS_DIR + f'p4_2_evals.png', bbox_inches='tight')
-    for bdry in ('open', 'loop'):
+    for bdry in fig_comp:
         ax_comp[bdry].set_xlabel(r'$h/J$')
         ax_comp[bdry].set_ylabel(r'Difference ($J$)')
         fig_comp[bdry].legend(**LEGEND_OPTIONS)
@@ -141,7 +142,74 @@ def p4_2(Lspace=LSPACE):
 
 
 def p4_3(Lspace=LSPACE):
-    pass
+    h = {'ferro': np.where(HSPACE == 0.25)[0][0], 'para': np.where(HSPACE == 0.75)[0][0]}
+    gnd_eng = {}
+    for mag in h:
+        gnd_eng[mag] = {'open': [], 'loop': []}
+    for L in Lspace:
+        for mag in h:
+            for bdry in gnd_eng[mag]:
+                evals = np.load(CACHE_DIR + f'sparse_eigs_{bdry}_L{L}.npz')['evals']
+                gnd_eng[mag][bdry].append(np.min(evals, axis=-1)[h[mag]] / L)
+
+    fig, axes = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(10, 5))
+    for i, mag in enumerate(h):
+        for bdry in gnd_eng[mag]:
+            if bdry == 'open':
+                bulk_open = [None] * 2
+                for j in range(2, len(gnd_eng[mag][bdry])):
+                    bulk_open += [(gnd_eng[mag][bdry][j] * Lspace[j] - gnd_eng[mag][bdry][j-2] * Lspace[j-2])/2]
+                axes[i].plot(Lspace, gnd_eng[mag][bdry], label='Open Boundary')
+                axes[i].plot(Lspace, bulk_open, label='Bulk of Open Boundary:\n' + r'$(E_0(L) - E_0(L-2))/2J$')
+            else:
+                axes[i].plot(Lspace, gnd_eng[mag][bdry], label='Periodic Boundary')
+            handles, labels = axes[i].get_legend_handles_labels()
+
+        fig.legend(handles, labels, **LEGEND_OPTIONS)
+        axes[i].set_title(rf'$h={HSPACE[h[mag]]}$')
+        axes[i].set_xlabel(r'$L$')
+        axes[i].set_ylabel(r'$E_0(L)/J$')
+    plt.savefig(FIGS_DIR + 'p4_3_L_dep_of_gnd_eng.png', bbox_inches='tight')
+
+
+def p4_4(Lspace = LSPACE):
+    L = Lspace[-1]
+    data = np.load(CACHE_DIR + f'sparse_eigs_loop_L{L}.npz')
+    evals = data['evals']
+    evecs = data['evecs']
+
+    plt.figure()
+    for i in range(1 + afew):
+        plt.plot(HSPACE, evals[:, i], label=rf'$E_{i}$')
+    plt.xlabel(r'$h/J$')
+    plt.ylabel(r'$E_i/J$')
+    plt.legend()
+    # plt.yscale('log')
+    plt.savefig(FIGS_DIR + f'p4_4_L{L}_spectrum_linear.png', bbox_inches='tight')
+
+    plt.figure()
+    plt.plot(HSPACE, np.abs(evals[:, 0] - evals[:, 1]))
+    plt.xlabel(r'$h/J$')
+    plt.ylabel(r'$|E_1 - E_0|/J$')
+    plt.savefig(FIGS_DIR + f'p4_4_L{L}_gap.png', bbox_inches='tight')
+
+    # scipy does not order the eigenvectors in a consistent way when we vary h. Hence, we have this complex method.
+    # We start at large h where the ground state is non-degenerate.
+    next_state = evecs[-1, :, 0]
+    for i in reversed(range(len(evecs) - 1)):
+        for j in range(1 + afew):
+            if evals[i, j] > evals[i, 0]:
+                break
+
+
+
+    fid = []
+
+    plt.figure()
+    plt.plot(HSPACE[:-1], fid)
+    plt.xlabel(r'$h/J$')
+    plt.ylabel(rf'Fidelity, $\delta h = {HSPACE[1] - HSPACE[0]}$')
+    plt.savefig(FIGS_DIR + f'p4_4_L{L}_fid.png', bbox_inches='tight')
 
 
 if __name__ == '__main__':
@@ -150,9 +218,15 @@ if __name__ == '__main__':
         p4_2_Lspace = np.arange(5, 21)
 
         print('4.1.' + '-' * 50, file=output)
-        p4_1(Lspace=p4_1_Lspace)
+        # p4_1(Lspace=p4_1_Lspace)
 
         print('4.2.' + '-' * 50, file=output)
-        p4_2(Lspace=p4_2_Lspace)
+        # p4_2(Lspace=p4_2_Lspace)
+
+        print('4.3.' + '-' * 50, file=output)
+        # p4_3(Lspace=p4_2_Lspace)
+
+        print('4.4.' + '-' * 50, file=output)
+        p4_4(Lspace=p4_2_Lspace)
 
     # plt.show()
