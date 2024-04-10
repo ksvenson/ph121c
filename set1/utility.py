@@ -16,8 +16,7 @@ def cache(method: cache_type, base):
             fname += f'.{method}'
             if os.path.isfile(fname):
                 if method == 'npy':
-                    with np.load(fname) as file:
-                        data = dict(file)
+                    data = np.load(fname)
                 elif method == 'npz':
                     data = dict(np.load(fname))
                 elif method == 'pkl':

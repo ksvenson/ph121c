@@ -141,8 +141,7 @@ def p4_2(Lspace=LSPACE):
 
 
 def p4_3(Lspace=LSPACE):
-    f_h = 0.25
-    p_h = 1.75
+    pass
 
 
 if __name__ == '__main__':
