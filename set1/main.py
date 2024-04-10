@@ -195,18 +195,24 @@ def p4_4(Lspace = LSPACE):
 
     # scipy does not order the eigenvectors in a consistent way when we vary h. Hence, we have this complex method.
     # We start at large h where the ground state is non-degenerate.
+    fids = []
     next_state = evecs[-1, :, 0]
     for i in reversed(range(len(evecs) - 1)):
+        max_fid_idx = -1
+        max_fid = -1
         for j in range(1 + afew):
             if evals[i, j] > evals[i, 0]:
                 break
-
-
-
-    fid = []
+            else:
+                fid = np.abs(np.sum(evecs[i, :, j] * next_state))
+                if fid > max_fid:
+                    max_fid_idx = j
+                    max_fid = fid
+        next_state = evecs[i, :, max_fid_idx]
+        fids.append(max_fid)
 
     plt.figure()
-    plt.plot(HSPACE[:-1], fid)
+    plt.plot(HSPACE[:-1], fids)
     plt.xlabel(r'$h/J$')
     plt.ylabel(rf'Fidelity, $\delta h = {HSPACE[1] - HSPACE[0]}$')
     plt.savefig(FIGS_DIR + f'p4_4_L{L}_fid.png', bbox_inches='tight')
