@@ -235,29 +235,26 @@ def p4_5(Lspace=LSPACE):
     fig_correl.legend(handles, labels, **LEGEND_OPTIONS)
     fig_correl.savefig(FIGS_DIR + 'p4_5_correl.png', bbox_inches='tight')
 
-    fig_order, axes_order = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(15, 5))
+    fig_order, axes_order = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(10, 5))
     for C, L in enumerate(Lspace):
-        gnd_states = np.load(CACHE_DIR + f'sparse_eigs_loop_L{L}.npz')[:, :, 0]
+        gnd_states = np.load(CACHE_DIR + f'sparse_eigs_loop_L{L}.npz')['evecs'][:, :, 0]
         states = np.arange(2**L)
         half_loop = np.sum(gnd_states**2 * (-2 * ((states % 2) ^ (states >> (L//2)) & 2) + 1), axis=-1)
         exp_vals = np.matmul(gnd_states**2, (-2 * ((states % 2) ^ (states >> np.arange(L)[:, np.newaxis]) & 2) + 1).T)
-        half_loop = exp_vals[:, L//2]
+        # half_loop = exp_vals[:, L//2]
         M2 = np.sum(exp_vals, axis=-1) / L
 
+        axes_order[0].plot(HSPACE, half_loop, label=rf'$L={L}$', color=f'C{C}')
+        axes_order[1].plot(HSPACE, M2, label=rf'$L={L}$', color=f'C{C}')
 
-
+    axes_order[0].set_ylabel(r'$\langle \sigma_1^z \sigma_{L/2}^z \rangle$')
+    axes_order[1].set_ylabel(r'$\langle (M/L)^2 \rangle$')
+    for ax in axes_order:
+        ax.set_xlabel(r'$h$')
     handles, labels = axes_order[0].get_legend_handles_labels()
     fig_order.legend(handles, labels, **LEGEND_OPTIONS)
     fig_order.savefig(FIGS_DIR + 'p4_5_order.png', bbox_inches='tight')
 
-
-    axes_order[mag_idx].plot(Lspace, half_loop[mag], label=r'$\sqrt{\langle \sigma_1^z \sigma_{L/2}^z \rangle}$')
-    axes_order[mag_idx].plot(Lspace, M2[mag] / (Lspace ** 2), label=r'$\langle (M/L)^2 \rangle$')
-    axes_order[mag_idx].set_title(mag + rf': $h={HSPACE[h[mag]]}$')
-    axes_order[mag_idx].set_xlabel(r'$L$')
-    axes_order[mag_idx].set_ylabel('Order Parameter')
-    half_loop[mag].append(np.sqrt(correl[L // 2]))
-    M2[mag] = L * np.sum(correl)
 
 if __name__ == '__main__':
     p4_1_Lspace = np.array([8, 10, 12])
