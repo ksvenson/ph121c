@@ -6,6 +6,10 @@ from typing import Literal
 cache_type = Literal['npy', 'npz', 'pkl']
 
 
+class PhysicsError(Exception):
+    pass
+
+
 def cache(method: cache_type, base):
     def wrap(func):
         def inner(*args, **kwargs):

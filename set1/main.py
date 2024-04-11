@@ -59,7 +59,7 @@ def dense_eigs(H, hspace=HSPACE, note=None):
     all_evecs = []
     for i in range(len(hspace)):
         print(f'finding dense evals: L={np.log2(H[i].shape[0])}, h={hspace[i]}')
-        evals, evecs = sp.linalg.eig(H[i])
+        evals, evecs = sp.linalg.eigh(H[i])
         all_evals.append(evals)
         all_evecs.append(evecs)
     return {'evals': np.array(all_evals), 'evecs': np.array(all_evecs)}
@@ -71,7 +71,7 @@ def sparse_eigs(H, hspace=HSPACE, note=None):
     all_evecs = []
     for i in range(len(hspace)):
         print(f'finding sparse evals: L={np.log2(H[i].shape[0])}, h={hspace[i]}')
-        evals, evecs = sp.sparse.linalg.eigs(H[i], k=1+afew, which='SR')
+        evals, evecs = sp.sparse.linalg.eigsh(H[i], k=1+afew, which='SA')
         all_evals.append(evals)
         all_evecs.append(evecs)
     return {'evals': np.array(all_evals), 'evecs': np.array(all_evecs)}
@@ -131,7 +131,7 @@ def p4_2(Lspace=LSPACE):
         ax.set_title(rf'$|{i}\rangle$')
         ax.set_xlabel(r'$h/J$')
         ax.set_ylabel(rf'$E_{i}/J$')
-        handles, labels = ax.get_legend_handles_labels()
+    handles, labels = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, **LEGEND_OPTIONS)
     fig.savefig(FIGS_DIR + f'p4_2_evals.png', bbox_inches='tight')
     for bdry in fig_comp:
@@ -163,8 +163,7 @@ def p4_3(Lspace=LSPACE):
                 axes[i].plot(Lspace, bulk_open, label='Bulk of Open Boundary:\n' + r'$(E_0(L) - E_0(L-2))/2J$')
             else:
                 axes[i].plot(Lspace, gnd_eng[mag][bdry], label='Periodic Boundary')
-            handles, labels = axes[i].get_legend_handles_labels()
-
+        handles, labels = axes[0].get_legend_handles_labels()
         fig.legend(handles, labels, **LEGEND_OPTIONS)
         axes[i].set_title(rf'$h={HSPACE[h[mag]]}$')
         axes[i].set_xlabel(r'$L$')
@@ -193,29 +192,43 @@ def p4_4(Lspace = LSPACE):
     plt.ylabel(r'$|E_1 - E_0|/J$')
     plt.savefig(FIGS_DIR + f'p4_4_L{L}_gap.png', bbox_inches='tight')
 
-    # scipy does not order the eigenvectors in a consistent way when we vary h. Hence, we have this complex method.
+    # When there are degenerate eigenstates, there is no easy way to distinguish them. Hence, in order to get a smooth
+    # plot, we have this more complex method.
     # We start at large h where the ground state is non-degenerate.
-    fids = []
+    fid = []
     next_state = evecs[-1, :, 0]
     for i in reversed(range(len(evecs) - 1)):
-        max_fid_idx = -1
-        max_fid = -1
-        for j in range(1 + afew):
-            if evals[i, j] > evals[i, 0]:
-                break
-            else:
-                fid = np.abs(np.sum(evecs[i, :, j] * next_state))
-                if fid > max_fid:
-                    max_fid_idx = j
-                    max_fid = fid
+        gnd_states = evecs[i, :, ~(evals[i] > evals[i, 0])]
+        fids = np.abs(np.sum(gnd_states * next_state, axis=-1))
+        max_fid_idx = np.argmax(fids)
         next_state = evecs[i, :, max_fid_idx]
-        fids.append(max_fid)
+        fid.append(fids[max_fid_idx])
+    fid = fid[::-1]
 
     plt.figure()
-    plt.plot(HSPACE[:-1], fids)
+    plt.plot(HSPACE[:-1], fid)
     plt.xlabel(r'$h/J$')
     plt.ylabel(rf'Fidelity, $\delta h = {HSPACE[1] - HSPACE[0]}$')
     plt.savefig(FIGS_DIR + f'p4_4_L{L}_fid.png', bbox_inches='tight')
+
+
+def p4_5(Lspace=LSPACE):
+    h = {
+        'ferro': np.where(HSPACE == 0.25)[0][0],
+        'para': np.where(HSPACE == 0.75)[0][0],
+        'crit': np.where(HSPACE == 0)[0][0]
+    }
+    fig, axes = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
+    for C, L in enumerate(Lspace):
+        for mag_idx, mag in enumerate(h):
+            gnd_state = np.load(CACHE_DIR + f'sparse_eigs_loop_L{L}.npz')['evecs'][h[mag]][:, 0]
+            states = np.arange(2**L)
+            correl = [np.sum(gnd_state**2 * (states % 2) * ((states >> i) % 2)) for i in range(2**L)]
+            axes[mag_idx].plot(states, correl, label=rf'$L={L}')
+    handles, labels = axes[0].get_legend_handles_labels()
+
+
+
 
 
 if __name__ == '__main__':
