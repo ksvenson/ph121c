@@ -214,38 +214,64 @@ def p4_4(Lspace = LSPACE):
 
 def p4_5(Lspace=LSPACE):
     h = {
-        'ferro': np.where(HSPACE == 0.25)[0][0],
-        'para': np.where(HSPACE == 0.75)[0][0],
-        'crit': np.where(HSPACE == 0)[0][0]
+        'Ferromagnet': np.where(HSPACE == 0.25)[0][0],
+        'Critical Point': np.where(HSPACE == 1)[0][0],
+        'Paramagnet': np.where(HSPACE == 1.75)[0][0]
     }
-    fig, axes = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
-    for C, L in enumerate(Lspace):
-        for mag_idx, mag in enumerate(h):
+    fig_correl, axes_correl = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
+
+    for mag_idx, mag in enumerate(h):
+        for C, L in enumerate(Lspace):
             gnd_state = np.load(CACHE_DIR + f'sparse_eigs_loop_L{L}.npz')['evecs'][h[mag]][:, 0]
-            states = np.arange(2**L)
-            correl = [np.sum(gnd_state**2 * (states % 2) * ((states >> i) % 2)) for i in range(2**L)]
-            axes[mag_idx].plot(states, correl, label=rf'$L={L}')
-    handles, labels = axes[0].get_legend_handles_labels()
+            states = np.arange(2 ** L)
+            correl = [np.sum(gnd_state**2 * (states % 2) * ((states >> i) % 2)) for i in range(L)]
+            axes_correl[mag_idx].plot(np.arange(L//2), correl[:L//2], label=rf'$L={L}$', color=f'C{C}')
+        axes_correl[mag_idx].set_title(mag + rf': $h={HSPACE[h[mag]]}$')
+        axes_correl[mag_idx].set_xlabel(r'$r$')
+        axes_correl[mag_idx].set_ylabel(r'$C^{zz}(r)$')
+
+
+    handles, labels = axes_correl[0].get_legend_handles_labels()
+    fig_correl.legend(handles, labels, **LEGEND_OPTIONS)
+    fig_correl.savefig(FIGS_DIR + 'p4_5_correl.png', bbox_inches='tight')
+
+    fig_order, axes_order = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(15, 5))
+    for C, L in enumerate(Lspace):
+        gnd_states = np.load(CACHE_DIR + f'sparse_eigs_loop_L{L}.npz')[:, :, 0]
+        states = np.arange(2**L)
+        half_loop = np.sum(gnd_states**2 * (-2 * ((states % 2) ^ (states >> (L//2)) & 2) + 1), axis=-1)
+        exp_vals = np.matmul(gnd_states**2, (-2 * ((states % 2) ^ (states >> np.arange(L)[:, np.newaxis]) & 2) + 1).T)
+        half_loop = exp_vals[:, L//2]
+        M2 = np.sum(exp_vals, axis=-1) / L
 
 
 
+    handles, labels = axes_order[0].get_legend_handles_labels()
+    fig_order.legend(handles, labels, **LEGEND_OPTIONS)
+    fig_order.savefig(FIGS_DIR + 'p4_5_order.png', bbox_inches='tight')
 
+
+    axes_order[mag_idx].plot(Lspace, half_loop[mag], label=r'$\sqrt{\langle \sigma_1^z \sigma_{L/2}^z \rangle}$')
+    axes_order[mag_idx].plot(Lspace, M2[mag] / (Lspace ** 2), label=r'$\langle (M/L)^2 \rangle$')
+    axes_order[mag_idx].set_title(mag + rf': $h={HSPACE[h[mag]]}$')
+    axes_order[mag_idx].set_xlabel(r'$L$')
+    axes_order[mag_idx].set_ylabel('Order Parameter')
+    half_loop[mag].append(np.sqrt(correl[L // 2]))
+    M2[mag] = L * np.sum(correl)
 
 if __name__ == '__main__':
-    with open('output.txt', 'w') as output:
-        p4_1_Lspace = np.array([8, 10, 12])
-        p4_2_Lspace = np.arange(5, 21)
+    p4_1_Lspace = np.array([8, 10, 12])
+    p4_2_Lspace = np.arange(5, 21)
+    p4_5_Lspace = np.arange(6, 22, 2)
 
-        print('4.1.' + '-' * 50, file=output)
-        # p4_1(Lspace=p4_1_Lspace)
+    # p4_1(Lspace=p4_1_Lspace)
 
-        print('4.2.' + '-' * 50, file=output)
-        # p4_2(Lspace=p4_2_Lspace)
+    # p4_2(Lspace=p4_2_Lspace)
 
-        print('4.3.' + '-' * 50, file=output)
-        # p4_3(Lspace=p4_2_Lspace)
+    # p4_3(Lspace=p4_2_Lspace)
 
-        print('4.4.' + '-' * 50, file=output)
-        p4_4(Lspace=p4_2_Lspace)
+    # p4_4(Lspace=p4_2_Lspace)
+
+    p4_5(Lspace=p4_5_Lspace)
 
     # plt.show()
