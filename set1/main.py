@@ -77,7 +77,6 @@ def sparse_eigs(H, hspace=HSPACE, note=None):
     return {'evals': np.array(all_evals), 'evecs': np.array(all_evecs)}
 
 
-# 4.1
 def p4_1(Lspace=LSPACE):
     plt.figure()
     for C, L in enumerate(Lspace):
@@ -199,7 +198,7 @@ def p4_4(Lspace = LSPACE):
     next_state = evecs[-1, :, 0]
     for i in reversed(range(len(evecs) - 1)):
         gnd_states = evecs[i, :, ~(evals[i] > evals[i, 0])]
-        fids = np.abs(np.sum(gnd_states * next_state, axis=-1))
+        fids = np.abs(np.sum(np.conj(gnd_states) * next_state, axis=-1))
         max_fid_idx = np.argmax(fids)
         next_state = evecs[i, :, max_fid_idx]
         fid.append(fids[max_fid_idx])
@@ -224,12 +223,11 @@ def p4_5(Lspace=LSPACE):
         for C, L in enumerate(Lspace):
             gnd_state = np.load(CACHE_DIR + f'sparse_eigs_loop_L{L}.npz')['evecs'][h[mag]][:, 0]
             states = np.arange(2 ** L)
-            correl = [np.sum(gnd_state**2 * (states % 2) * ((states >> i) % 2)) for i in range(L)]
+            correl = [np.sum(np.abs(gnd_state)**2 * (-2 * ((states % 2) ^ ((states >> i) % 2)) + 1)) for i in range(L)]
             axes_correl[mag_idx].plot(np.arange(L//2), correl[:L//2], label=rf'$L={L}$', color=f'C{C}')
         axes_correl[mag_idx].set_title(mag + rf': $h={HSPACE[h[mag]]}$')
         axes_correl[mag_idx].set_xlabel(r'$r$')
         axes_correl[mag_idx].set_ylabel(r'$C^{zz}(r)$')
-
 
     handles, labels = axes_correl[0].get_legend_handles_labels()
     fig_correl.legend(handles, labels, **LEGEND_OPTIONS)
@@ -239,9 +237,8 @@ def p4_5(Lspace=LSPACE):
     for C, L in enumerate(Lspace):
         gnd_states = np.load(CACHE_DIR + f'sparse_eigs_loop_L{L}.npz')['evecs'][:, :, 0]
         states = np.arange(2**L)
-        half_loop = np.sum(gnd_states**2 * (-2 * ((states % 2) ^ (states >> (L//2)) & 2) + 1), axis=-1)
-        exp_vals = np.matmul(gnd_states**2, (-2 * ((states % 2) ^ (states >> np.arange(L)[:, np.newaxis]) & 2) + 1).T)
-        # half_loop = exp_vals[:, L//2]
+        exp_vals = np.matmul(np.abs(gnd_states)**2, (-2 * ((states % 2) ^ (states >> np.arange(L)[:, np.newaxis]) % 2) + 1).T)
+        half_loop = exp_vals[:, L//2]
         M2 = np.sum(exp_vals, axis=-1) / L
 
         axes_order[0].plot(HSPACE, half_loop, label=rf'$L={L}$', color=f'C{C}')
@@ -271,4 +268,4 @@ if __name__ == '__main__':
 
     p4_5(Lspace=p4_5_Lspace)
 
-    # plt.show()
+    plt.show()
