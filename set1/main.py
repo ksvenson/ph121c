@@ -10,7 +10,7 @@ HSPACE = np.linspace(0, 2, 17)
 CACHE_DIR = './data/'
 FIGS_DIR = './figs/'
 LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
-afew = 3
+num_ext_states = 3
 
 
 @utility.cache('npz', CACHE_DIR + 'dense_H')
@@ -71,10 +71,41 @@ def sparse_eigs(H, hspace=HSPACE, note=None):
     all_evecs = []
     for i in range(len(hspace)):
         print(f'finding sparse evals: L={np.log2(H[i].shape[0])}, h={hspace[i]}')
-        evals, evecs = sp.sparse.linalg.eigsh(H[i], k=1+afew, which='SA')
+        evals, evecs = sp.sparse.linalg.eigsh(H[i], k=1+num_ext_states, which='SA')
         all_evals.append(evals)
         all_evecs.append(evecs)
     return {'evals': np.array(all_evals), 'evecs': np.array(all_evecs)}
+
+
+@utility.cache('pkl', CACHE_DIR + 'sparse_H_sx')
+def make_sparse_H_sx(L, hspace=HSPACE, note=None):
+    plus_states = []
+    minus_states = []
+    for i in range(2**L):
+        if i.bit_count() % 2 == 0:
+            plus_states.append(i)
+        else:
+            minus_states.append(i)
+    all_states = np.array([minus_states, plus_states])
+    H = []
+    for i, h in enumerate(hspace):
+        H.append([])
+        for sign, states in enumerate(all_states):
+            print(f'making sparse H in sx basis: L={L}, h={h}')
+            row = []
+            col = []
+            data = []
+            for j, state in enumerate(states):
+                row.append(j)
+                col.append(j)
+                data.append(-h * (2 * state.bit_count() - L))
+                for flip in range(L-1):
+                    # row.append(np.where(states == state ^ (0b11 << flip))[0][0])
+                    row.append(5)
+                    col.append(j)
+                    data.append(-1)
+            H[i].append(sp.sparse.csr_matrix((data, (row, col)), shape=(len(states), len(states))))
+    return H
 
 
 def p4_1(Lspace=LSPACE):
@@ -177,12 +208,11 @@ def p4_4(Lspace = LSPACE):
     evecs = data['evecs']
 
     plt.figure()
-    for i in range(1 + afew):
+    for i in range(1 + num_ext_states):
         plt.plot(HSPACE, evals[:, i], label=rf'$E_{i}$')
     plt.xlabel(r'$h/J$')
     plt.ylabel(r'$E_i/J$')
     plt.legend()
-    # plt.yscale('log')
     plt.savefig(FIGS_DIR + f'p4_4_L{L}_spectrum_linear.png', bbox_inches='tight')
 
     plt.figure()
@@ -191,18 +221,8 @@ def p4_4(Lspace = LSPACE):
     plt.ylabel(r'$|E_1 - E_0|/J$')
     plt.savefig(FIGS_DIR + f'p4_4_L{L}_gap.png', bbox_inches='tight')
 
-    # When there are degenerate eigenstates, there is no easy way to distinguish them. Hence, in order to get a smooth
-    # plot, we have this more complex method.
-    # We start at large h where the ground state is non-degenerate.
-    fid = []
-    next_state = evecs[-1, :, 0]
-    for i in reversed(range(len(evecs) - 1)):
-        gnd_states = evecs[i, :, ~(evals[i] > evals[i, 0])]
-        fids = np.abs(np.sum(np.conj(gnd_states) * next_state, axis=-1))
-        max_fid_idx = np.argmax(fids)
-        next_state = evecs[i, :, max_fid_idx]
-        fid.append(fids[max_fid_idx])
-    fid = fid[::-1]
+    gnd_states = evecs[:, :, 0]
+    fid = np.abs(np.sum(np.conj(gnd_states) * np.roll(gnd_states, -1, axis=0), axis=-1))[:-1]
 
     plt.figure()
     plt.plot(HSPACE[:-1], fid)
@@ -217,32 +237,24 @@ def p4_5(Lspace=LSPACE):
         'Critical Point': np.where(HSPACE == 1)[0][0],
         'Paramagnet': np.where(HSPACE == 1.75)[0][0]
     }
-    fig_correl, axes_correl = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
-
-    for mag_idx, mag in enumerate(h):
-        for C, L in enumerate(Lspace):
-            gnd_state = np.load(CACHE_DIR + f'sparse_eigs_loop_L{L}.npz')['evecs'][h[mag]][:, 0]
-            states = np.arange(2 ** L)
-            correl = [np.sum(np.abs(gnd_state)**2 * (-2 * ((states % 2) ^ ((states >> i) % 2)) + 1)) for i in range(L)]
-            axes_correl[mag_idx].plot(np.arange(L//2), correl[:L//2], label=rf'$L={L}$', color=f'C{C}')
-        axes_correl[mag_idx].set_title(mag + rf': $h={HSPACE[h[mag]]}$')
-        axes_correl[mag_idx].set_xlabel(r'$r$')
-        axes_correl[mag_idx].set_ylabel(r'$C^{zz}(r)$')
-
-    handles, labels = axes_correl[0].get_legend_handles_labels()
-    fig_correl.legend(handles, labels, **LEGEND_OPTIONS)
-    fig_correl.savefig(FIGS_DIR + 'p4_5_correl.png', bbox_inches='tight')
-
     fig_order, axes_order = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(10, 5))
+    fig_correl, axes_correl = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
     for C, L in enumerate(Lspace):
         gnd_states = np.load(CACHE_DIR + f'sparse_eigs_loop_L{L}.npz')['evecs'][:, :, 0]
         states = np.arange(2**L)
         exp_vals = np.matmul(np.abs(gnd_states)**2, (-2 * ((states % 2) ^ (states >> np.arange(L)[:, np.newaxis]) % 2) + 1).T)
-        half_loop = exp_vals[:, L//2]
+        correl = exp_vals[:, :L//2]
+        half_loop = correl[:, -1]
         M2 = np.sum(exp_vals, axis=-1) / L
 
         axes_order[0].plot(HSPACE, half_loop, label=rf'$L={L}$', color=f'C{C}')
         axes_order[1].plot(HSPACE, M2, label=rf'$L={L}$', color=f'C{C}')
+
+        for mag_idx, mag in enumerate(h):
+            axes_correl[mag_idx].plot(np.arange(correl.shape[-1]), correl[h[mag]], label=rf'$L={L}$', color=f'C{C}')
+            axes_correl[mag_idx].set_title(mag + rf': $h={HSPACE[h[mag]]}$')
+            axes_correl[mag_idx].set_xlabel(r'$r$')
+            axes_correl[mag_idx].set_ylabel(r'$C^{zz}(r)$')
 
     axes_order[0].set_ylabel(r'$\langle \sigma_1^z \sigma_{L/2}^z \rangle$')
     axes_order[1].set_ylabel(r'$\langle (M/L)^2 \rangle$')
@@ -252,20 +264,32 @@ def p4_5(Lspace=LSPACE):
     fig_order.legend(handles, labels, **LEGEND_OPTIONS)
     fig_order.savefig(FIGS_DIR + 'p4_5_order.png', bbox_inches='tight')
 
+    handles, labels = axes_correl[0].get_legend_handles_labels()
+    fig_correl.legend(handles, labels, **LEGEND_OPTIONS)
+    fig_correl.savefig(FIGS_DIR + 'p4_5_correl.png', bbox_inches='tight')
+
+
+def p4_7(Lspace=LSPACE):
+    for L in Lspace:
+        make_sparse_H_sx(L, hspace=HSPACE, note=f'L{L}')
+
 
 if __name__ == '__main__':
     p4_1_Lspace = np.array([8, 10, 12])
     p4_2_Lspace = np.arange(5, 21)
     p4_5_Lspace = np.arange(6, 22, 2)
+    p4_7_Lspace = np.arange(5, 22)
 
     # p4_1(Lspace=p4_1_Lspace)
 
-    # p4_2(Lspace=p4_2_Lspace)
+    p4_2(Lspace=p4_2_Lspace)
 
     # p4_3(Lspace=p4_2_Lspace)
 
     # p4_4(Lspace=p4_2_Lspace)
 
-    p4_5(Lspace=p4_5_Lspace)
+    # p4_5(Lspace=p4_5_Lspace)
 
-    plt.show()
+    p4_7(Lspace=p4_7_Lspace)
+
+    # plt.show()
