@@ -2,6 +2,7 @@ import numpy as np
 import scipy as sp
 import matplotlib.pyplot as plt
 import utility
+from collections import OrderedDict
 
 plt.rcParams['font.size'] = 14
 
@@ -29,6 +30,7 @@ def make_dense_H(L, hspace=HSPACE, note=None):
 
 @utility.cache('pkl', CACHE_DIR + 'sparse_H')
 def make_sparse_H(L, hspace=HSPACE, note=None):
+    # 0 for spin down, 1 for spin up.
     dim = 2 ** L
     H_open = []
     H_loop = []
@@ -79,19 +81,17 @@ def sparse_eigs(H, hspace=HSPACE, note=None):
 
 @utility.cache('pkl', CACHE_DIR + 'sparse_H_sx')
 def make_sparse_H_sx(L, hspace=HSPACE, note=None):
-    plus_states = []
-    minus_states = []
-    for i in range(2**L):
-        if i.bit_count() % 2 == 0:
-            plus_states.append(i)
-        else:
-            minus_states.append(i)
-    all_states = np.array([minus_states, plus_states])
+    # 0 for antisymmetric state, 1 for symmetric state.
+    all_states = [OrderedDict(), OrderedDict()]
+    for state in range(2**L):
+        sign = state.bit_count() % 2
+        idx = len(all_states[sign])
+        all_states[sign][state] = idx
     H = []
     for i, h in enumerate(hspace):
+        print(f'making sparse H in sx basis: L={L}, h={h}')
         H.append([])
         for sign, states in enumerate(all_states):
-            print(f'making sparse H in sx basis: L={L}, h={h}')
             row = []
             col = []
             data = []
@@ -100,12 +100,26 @@ def make_sparse_H_sx(L, hspace=HSPACE, note=None):
                 col.append(j)
                 data.append(-h * (2 * state.bit_count() - L))
                 for flip in range(L-1):
-                    # row.append(np.where(states == state ^ (0b11 << flip))[0][0])
-                    row.append(5)
+                    row.append(states[state ^ (0b11 << flip)])
                     col.append(j)
                     data.append(-1)
             H[i].append(sp.sparse.csr_matrix((data, (row, col)), shape=(len(states), len(states))))
     return H
+
+
+@utility.cache('npz', CACHE_DIR + 'sparse_eigs_sx')
+def sparse_eigs_sx(H, note=None):
+    all_evals = []
+    all_evecs = []
+    for i, blocks in enumerate(H):
+        print(f'finding sparse evals in sx basis: L={np.log2(blocks[0].shape[0]) + 1}, h={HSPACE[i]}')
+        all_evals.append([])
+        all_evecs.append([])
+        for sign, block in enumerate(blocks):
+            evals, evecs = sp.sparse.linalg.eigsh(block, k=1+num_ext_states, which='SA')
+            all_evals[i].append(evals)
+            all_evecs[i].append(evecs)
+    return {'evals': np.array(all_evals), 'evecs': np.array(all_evecs)}
 
 
 def p4_1(Lspace=LSPACE):
@@ -252,14 +266,14 @@ def p4_5(Lspace=LSPACE):
 
         for mag_idx, mag in enumerate(h):
             axes_correl[mag_idx].plot(np.arange(correl.shape[-1]), correl[h[mag]], label=rf'$L={L}$', color=f'C{C}')
-            axes_correl[mag_idx].set_title(mag + rf': $h={HSPACE[h[mag]]}$')
+            axes_correl[mag_idx].set_title(mag + rf': $h/J={HSPACE[h[mag]]}$')
             axes_correl[mag_idx].set_xlabel(r'$r$')
             axes_correl[mag_idx].set_ylabel(r'$C^{zz}(r)$')
 
     axes_order[0].set_ylabel(r'$\langle \sigma_1^z \sigma_{L/2}^z \rangle$')
     axes_order[1].set_ylabel(r'$\langle (M/L)^2 \rangle$')
     for ax in axes_order:
-        ax.set_xlabel(r'$h$')
+        ax.set_xlabel(r'$h/J$')
     handles, labels = axes_order[0].get_legend_handles_labels()
     fig_order.legend(handles, labels, **LEGEND_OPTIONS)
     fig_order.savefig(FIGS_DIR + 'p4_5_order.png', bbox_inches='tight')
@@ -270,8 +284,49 @@ def p4_5(Lspace=LSPACE):
 
 
 def p4_7(Lspace=LSPACE):
+    fig, axes = plt.subplots(2, 2, sharex=True, sharey=True, figsize=(10, 10))
+    h = {
+        'Ferromagnet': np.where(HSPACE == 0.25)[0][0],
+        'Critical Point': np.where(HSPACE == 1)[0][0],
+        'Paramagnet': np.where(HSPACE == 1.75)[0][0]
+    }
+    splitting = {}
+    for mag in h:
+        splitting[mag] = []
+    color = 0
     for L in Lspace:
-        make_sparse_H_sx(L, hspace=HSPACE, note=f'L{L}')
+        print(L)
+        H = make_sparse_H_sx(L, hspace=HSPACE, note=f'L{L}')
+        eigs = sparse_eigs_sx(H, note=f'L{L}')
+        evals = eigs['evals']
+        minus_evals = evals[:, 0, :]
+        plus_evals = evals[:, 1, :]
+        for mag in h:
+            splitting[mag].append(np.abs(plus_evals[h[mag], 0] - minus_evals[h[mag], 0]))
+        # combined_evals = np.concatenate((minus_evals, plus_evals), axis=-1)
+        # # Use the last value of h to sort because the sorting should be independent of h
+        # sort = np.argsort(combined_evals[-1], axis=-1)
+        # if L in np.arange(8, 22, 2):
+        #     for i, ax in enumerate(axes.flatten()):
+        #         ax.plot(HSPACE, combined_evals[:, sort[i]], label=rf'$L={L}$', color=f'C{color}')
+        #         if sort[i] < (1+num_ext_states):
+        #             ax.set_title(rf'$|{i}\rangle$, from $(-)$ Sector')
+        #         else:
+        #             ax.set_title(rf'$|{i}\rangle$, from $(+)$ Sector')
+        #         ax.set_xlabel(r'$h/J$')
+        #         ax.set_ylabel(rf'$E_{i}/J$')
+        #     color += 1
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, **LEGEND_OPTIONS)
+    fig.savefig(FIGS_DIR + f'p4_7_evals_sx.png', bbox_inches='tight')
+
+    fig, axes = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
+    for i, mag in enumerate(h):
+        axes[i].plot(Lspace, splitting[mag])
+        axes[i].set_title(rf'${mag}: h/J={h}$')
+        axes[i].set_xlabel(r'$L$')
+        axes[i].set_ylabel(f'(E_1 - E_0)/J')
+    fig.savefig(FIGS_DIR + f'p4_7_splitting_sx.png', bbox_inches='tight')
 
 
 if __name__ == '__main__':
@@ -282,7 +337,7 @@ if __name__ == '__main__':
 
     # p4_1(Lspace=p4_1_Lspace)
 
-    p4_2(Lspace=p4_2_Lspace)
+    # p4_2(Lspace=p4_2_Lspace)
 
     # p4_3(Lspace=p4_2_Lspace)
 
