@@ -131,14 +131,15 @@ def p4_1(Lspace=LSPACE):
             for bdry in ('open', 'loop'):
                 gnd_eng[bdry] = np.min(dense_eigs(H[bdry], note=f'{bdry}_L{L}')['evals'], axis=-1)
         else:
+            # Not enough memory to do all values of h at once; need to cache them one-by-one.
             for i, h in enumerate(HSPACE):
                 fake_hspace = np.array([h])
                 H = make_dense_H(L, hspace=fake_hspace, note=f'L{L}_h{round(h, 3)}')
                 for bdry in ('open', 'loop'):
                     gnd_eng[bdry] = np.min(dense_eigs(H[bdry], hspace=fake_hspace, note=f'{bdry}_L{L}_h{round(h, 3)}')['evals'], axis=-1)[0]
 
-        plt.plot(HSPACE, gnd_eng['open'], label=rf'$L={L}$', color=f'C{C}')
-        plt.plot(HSPACE, gnd_eng['loop'], color=f'C{C}', linestyle='dotted')
+        plt.plot(HSPACE, gnd_eng['loop'], color=f'C{C}', label=rf'$L={L}$')
+        plt.plot(HSPACE, gnd_eng['open'], color=f'C{C}', linestyle='dotted')
     plt.xlabel(r'$h/J$')
     plt.ylabel(r'$E_0/J$')
     plt.legend()
@@ -147,30 +148,33 @@ def p4_1(Lspace=LSPACE):
 
 def p4_2(Lspace=LSPACE):
     fig, axes = plt.subplots(2, 2, sharex=True, sharey=True, figsize=(10, 10))
-    fig_comp = {}
-    ax_comp = {}
-    for bdry in ('open', 'loop'):
-        fig_comp[bdry], ax_comp[bdry] = plt.subplots()
+    fig_comp, axes_comp = plt.subplots(1, 2, sharex=True, figsize=(10, 5))
     color = 0
     for L in Lspace:
         H = make_sparse_H(L, note=f'L{L}')
         evals = {}
         evecs = {}
-        for bdry in H:
+        for i, bdry in enumerate(H):
             data = sparse_eigs(H[bdry], note=f'{bdry}_L{L}')
             evals[bdry] = data['evals']
             evecs[bdry] = data['evecs']
+            if L in p4_1_Lspace:
+                dense_evals = np.min(np.load(CACHE_DIR + f'dense_eigs_{bdry}_L{L}.npz')['evals'], axis=-1)
+                axes_comp[i].plot(HSPACE, np.abs(evals[bdry][:, 0] - dense_evals), label=rf'L={L}')
+                if bdry == 'loop':
+                    axes_comp[i].set_title('Periodic Boundary Conditions')
+                else:
+                    axes_comp[i].set_title('Open Boundary Conditions')
+                axes_comp[i].set_xlabel(r'$h/J$')
+                axes_comp[i].set_yscale('log')
+        axes_comp[0].set_ylabel(r'Difference ($J$)')
 
         if L in np.arange(8, 21, 2):
             for i, ax in enumerate(axes.flatten()):
-                ax.plot(HSPACE, evals['open'][:, i], label=rf'L={L}', color=f'C{color}')
-                ax.plot(HSPACE, evals['loop'][:, i], color=f'C{color}', linestyle='dotted')
+                ax.plot(HSPACE, evals['loop'][:, i], color=f'C{color}', label=rf'$L={L}$')
+                ax.plot(HSPACE, evals['open'][:, i], color=f'C{color}', linestyle='dotted')
             color += 1
-        for bdry in fig_comp:
-            if L in p4_1_Lspace:
-                dense_evals = np.min(np.load(CACHE_DIR + f'dense_eigs_{bdry}_L{L}.npz')['evals'], axis=-1)
-                ax_comp[bdry].plot(HSPACE, np.abs(evals[bdry][:, 0] - dense_evals), label=rf'L={L}')
-                ax_comp[bdry].set_yscale('log')
+
     for i, ax in enumerate(axes.flatten()):
         ax.set_title(rf'$|{i}\rangle$')
         ax.set_xlabel(r'$h/J$')
@@ -178,15 +182,14 @@ def p4_2(Lspace=LSPACE):
     handles, labels = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, **LEGEND_OPTIONS)
     fig.savefig(FIGS_DIR + f'p4_2_evals.png', bbox_inches='tight')
-    for bdry in fig_comp:
-        ax_comp[bdry].set_xlabel(r'$h/J$')
-        ax_comp[bdry].set_ylabel(r'Difference ($J$)')
-        fig_comp[bdry].legend(**LEGEND_OPTIONS)
-        fig_comp[bdry].savefig(FIGS_DIR + f'p4_2_{bdry}_comp.png', bbox_inches='tight')
+
+    handles, labels = axes_comp[0].get_legend_handles_labels()
+    fig_comp.legend(handles, labels, **LEGEND_OPTIONS)
+    fig_comp.savefig(FIGS_DIR + f'p4_2_comp.png', bbox_inches='tight')
 
 
 def p4_3(Lspace=LSPACE):
-    h = {'ferro': np.where(HSPACE == 0.25)[0][0], 'para': np.where(HSPACE == 0.75)[0][0]}
+    h = {'Ferromagnet': np.where(HSPACE == 0.25)[0][0], 'Paramagnet': np.where(HSPACE == 0.75)[0][0]}
     gnd_eng = {}
     for mag in h:
         gnd_eng[mag] = {'open': [], 'loop': []}
@@ -194,24 +197,24 @@ def p4_3(Lspace=LSPACE):
         for mag in h:
             for bdry in gnd_eng[mag]:
                 evals = np.load(CACHE_DIR + f'sparse_eigs_{bdry}_L{L}.npz')['evals']
-                gnd_eng[mag][bdry].append(np.min(evals, axis=-1)[h[mag]] / L)
+                gnd_eng[mag][bdry].append(np.min(evals[h[mag]]) / L)
 
     fig, axes = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(10, 5))
     for i, mag in enumerate(h):
         for bdry in gnd_eng[mag]:
             if bdry == 'open':
-                bulk_open = [None] * 2
+                bulk_open = []
                 for j in range(2, len(gnd_eng[mag][bdry])):
-                    bulk_open += [(gnd_eng[mag][bdry][j] * Lspace[j] - gnd_eng[mag][bdry][j-2] * Lspace[j-2])/2]
+                    bulk_open.append((gnd_eng[mag][bdry][j] * Lspace[j] - gnd_eng[mag][bdry][j-2] * Lspace[j-2])/2)
                 axes[i].plot(Lspace, gnd_eng[mag][bdry], label='Open Boundary')
-                axes[i].plot(Lspace, bulk_open, label='Bulk of Open Boundary:\n' + r'$(E_0(L) - E_0(L-2))/2J$')
+                axes[i].plot(Lspace[2:], bulk_open, label='Bulk of Open Boundary:\n' + r'$(E_0(L) - E_0(L-2))/2J$')
             else:
                 axes[i].plot(Lspace, gnd_eng[mag][bdry], label='Periodic Boundary')
         handles, labels = axes[0].get_legend_handles_labels()
         fig.legend(handles, labels, **LEGEND_OPTIONS)
-        axes[i].set_title(rf'$h={HSPACE[h[mag]]}$')
+        axes[i].set_title(mag + rf': $h={HSPACE[h[mag]]}$')
         axes[i].set_xlabel(r'$L$')
-        axes[i].set_ylabel(r'$E_0(L)/J$')
+    axes[0].set_ylabel('Ground State Energ per Site')
     plt.savefig(FIGS_DIR + 'p4_3_L_dep_of_gnd_eng.png', bbox_inches='tight')
 
 
@@ -268,7 +271,7 @@ def p4_5(Lspace=LSPACE):
             axes_correl[mag_idx].plot(np.arange(correl.shape[-1]), correl[h[mag]], label=rf'$L={L}$', color=f'C{C}')
             axes_correl[mag_idx].set_title(mag + rf': $h/J={HSPACE[h[mag]]}$')
             axes_correl[mag_idx].set_xlabel(r'$r$')
-            axes_correl[mag_idx].set_ylabel(r'$C^{zz}(r)$')
+        axes_correl[0].set_ylabel(r'$C^{zz}(r)$')
 
     axes_order[0].set_ylabel(r'$\langle \sigma_1^z \sigma_{L/2}^z \rangle$')
     axes_order[1].set_ylabel(r'$\langle (M/L)^2 \rangle$')
@@ -285,48 +288,40 @@ def p4_5(Lspace=LSPACE):
 
 def p4_7(Lspace=LSPACE):
     fig, axes = plt.subplots(2, 2, sharex=True, sharey=True, figsize=(10, 10))
-    h = {
-        'Ferromagnet': np.where(HSPACE == 0.25)[0][0],
-        'Critical Point': np.where(HSPACE == 1)[0][0],
-        'Paramagnet': np.where(HSPACE == 1.75)[0][0]
-    }
-    splitting = {}
-    for mag in h:
-        splitting[mag] = []
+    h = np.where(HSPACE == 0.25)[0][0]
+    splitting = []
     color = 0
     for L in Lspace:
-        print(L)
         H = make_sparse_H_sx(L, hspace=HSPACE, note=f'L{L}')
         eigs = sparse_eigs_sx(H, note=f'L{L}')
         evals = eigs['evals']
         minus_evals = evals[:, 0, :]
         plus_evals = evals[:, 1, :]
-        for mag in h:
-            splitting[mag].append(np.abs(plus_evals[h[mag], 0] - minus_evals[h[mag], 0]))
-        # combined_evals = np.concatenate((minus_evals, plus_evals), axis=-1)
-        # # Use the last value of h to sort because the sorting should be independent of h
-        # sort = np.argsort(combined_evals[-1], axis=-1)
-        # if L in np.arange(8, 22, 2):
-        #     for i, ax in enumerate(axes.flatten()):
-        #         ax.plot(HSPACE, combined_evals[:, sort[i]], label=rf'$L={L}$', color=f'C{color}')
-        #         if sort[i] < (1+num_ext_states):
-        #             ax.set_title(rf'$|{i}\rangle$, from $(-)$ Sector')
-        #         else:
-        #             ax.set_title(rf'$|{i}\rangle$, from $(+)$ Sector')
-        #         ax.set_xlabel(r'$h/J$')
-        #         ax.set_ylabel(rf'$E_{i}/J$')
-        #     color += 1
+        splitting.append(np.abs(plus_evals[h, 0] - minus_evals[h, 0]))
+        combined_evals = np.concatenate((minus_evals, plus_evals), axis=-1)
+        # Use the last value of h to sort because the sorting should be independent of h
+        sort = np.argsort(combined_evals[-1], axis=-1)
+        if L in np.arange(8, 22, 2):
+            for i, ax in enumerate(axes.flatten()):
+                ax.plot(HSPACE, combined_evals[:, sort[i]], label=rf'$L={L}$', color=f'C{color}')
+                if sort[i] < (1+num_ext_states):
+                    ax.set_title(rf'$|{i}\rangle$, from $(-)$ Sector')
+                else:
+                    ax.set_title(rf'$|{i}\rangle$, from $(+)$ Sector')
+                ax.set_xlabel(r'$h/J$')
+                ax.set_ylabel(rf'$E_{i}/J$')
+            color += 1
     handles, labels = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, **LEGEND_OPTIONS)
     fig.savefig(FIGS_DIR + f'p4_7_evals_sx.png', bbox_inches='tight')
 
-    fig, axes = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
-    for i, mag in enumerate(h):
-        axes[i].plot(Lspace, splitting[mag])
-        axes[i].set_title(rf'${mag}: h/J={h}$')
-        axes[i].set_xlabel(r'$L$')
-        axes[i].set_ylabel(f'(E_1 - E_0)/J')
-    fig.savefig(FIGS_DIR + f'p4_7_splitting_sx.png', bbox_inches='tight')
+    plt.figure()
+    plt.plot(Lspace, splitting)
+    plt.title('Ferromagnet' + rf': $h/J={HSPACE[h]}$')
+    plt.xlabel(r'$L$')
+    plt.ylabel(f'$(E_1 - E_0)/J$')
+    plt.yscale('log')
+    plt.savefig(FIGS_DIR + f'p4_7_splitting_sx.png', bbox_inches='tight')
 
 
 if __name__ == '__main__':
@@ -339,12 +334,10 @@ if __name__ == '__main__':
 
     # p4_2(Lspace=p4_2_Lspace)
 
-    # p4_3(Lspace=p4_2_Lspace)
+    p4_3(Lspace=p4_2_Lspace)
 
     # p4_4(Lspace=p4_2_Lspace)
 
     # p4_5(Lspace=p4_5_Lspace)
 
-    p4_7(Lspace=p4_7_Lspace)
-
-    # plt.show()
+    # p4_7(Lspace=p4_7_Lspace)
