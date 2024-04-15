@@ -122,6 +122,10 @@ def sparse_eigs_sx(H, note=None):
     return {'evals': np.array(all_evals), 'evecs': np.array(all_evecs)}
 
 
+def fit(h, a, hc, nu):
+    return a * np.abs(h - hc)**nu
+
+
 def p4_1(Lspace=LSPACE):
     plt.figure()
     for C, L in enumerate(Lspace):
@@ -218,25 +222,36 @@ def p4_3(Lspace=LSPACE):
     plt.savefig(FIGS_DIR + 'p4_3_L_dep_of_gnd_eng.png', bbox_inches='tight')
 
 
-def p4_4(Lspace = LSPACE):
+def p4_4(Lspace=LSPACE):
     L = Lspace[-1]
     data = np.load(CACHE_DIR + f'sparse_eigs_loop_L{L}.npz')
     evals = data['evals']
     evecs = data['evecs']
 
     plt.figure()
-    for i in range(1 + num_ext_states):
-        plt.plot(HSPACE, evals[:, i], label=rf'$E_{i}$')
+    for i in range(1, 1 + num_ext_states):
+        plt.plot(HSPACE, evals[:, i] - evals[:, 0], label=rf'$E_{i} - E_0$')
+    gap = evals[:, 1] - evals[:, 0]
+    start_idx = np.where(HSPACE == 1)[0][0]
+    popt, pcov = sp.optimize.curve_fit(fit, HSPACE[start_idx:], gap[start_idx:], p0=(1, 1, 1))
+    std = np.sqrt(np.diag(pcov))
+    with open('p4_4_fit_results.txt', 'w') as f:
+        print(f'a: {round(popt[0], 3)} \pm {round(std[0], 3)}', file=f)
+        print(f'hc: {round(popt[1], 3)} \pm {round(std[1], 3)}', file=f)
+        print(f'nu: {round(popt[2], 3)} \pm {round(std[2], 3)}', file=f)
+    plt.plot(HSPACE[start_idx:], fit(HSPACE[start_idx:], *popt), label=r'$\sim |h - h_c|^{\nu}$ Fit')
     plt.xlabel(r'$h/J$')
-    plt.ylabel(r'$E_i/J$')
+    plt.ylabel(r'Gap ($J$)')
     plt.legend()
-    plt.savefig(FIGS_DIR + f'p4_4_L{L}_spectrum_linear.png', bbox_inches='tight')
+    plt.savefig(FIGS_DIR + f'p4_4_L{L}_excitations.png', bbox_inches='tight')
 
-    plt.figure()
-    plt.plot(HSPACE, np.abs(evals[:, 0] - evals[:, 1]))
+
     plt.xlabel(r'$h/J$')
     plt.ylabel(r'$|E_1 - E_0|/J$')
+    plt.legend()
     plt.savefig(FIGS_DIR + f'p4_4_L{L}_gap.png', bbox_inches='tight')
+
+
 
     gnd_states = evecs[:, :, 0]
     fid = np.abs(np.sum(np.conj(gnd_states) * np.roll(gnd_states, -1, axis=0), axis=-1))[:-1]
@@ -334,9 +349,9 @@ if __name__ == '__main__':
 
     # p4_2(Lspace=p4_2_Lspace)
 
-    p4_3(Lspace=p4_2_Lspace)
+    # p4_3(Lspace=p4_2_Lspace)
 
-    # p4_4(Lspace=p4_2_Lspace)
+    p4_4(Lspace=p4_2_Lspace)
 
     # p4_5(Lspace=p4_5_Lspace)
 
