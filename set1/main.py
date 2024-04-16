@@ -193,7 +193,7 @@ def p4_2(Lspace=LSPACE):
 
 
 def p4_3(Lspace=LSPACE):
-    h = {'Ferromagnet': np.where(HSPACE == 0.25)[0][0], 'Paramagnet': np.where(HSPACE == 0.75)[0][0]}
+    h = {'Ferromagnet': np.where(HSPACE == 0.25)[0][0], 'Paramagnet': np.where(HSPACE == 1.75)[0][0]}
     gnd_eng = {}
     for mag in h:
         gnd_eng[mag] = {'open': [], 'loop': []}
@@ -203,7 +203,7 @@ def p4_3(Lspace=LSPACE):
                 evals = np.load(CACHE_DIR + f'sparse_eigs_{bdry}_L{L}.npz')['evals']
                 gnd_eng[mag][bdry].append(np.min(evals[h[mag]]) / L)
 
-    fig, axes = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(10, 5))
+    fig, axes = plt.subplots(1, 2, sharex=True, figsize=(12, 5))
     for i, mag in enumerate(h):
         for bdry in gnd_eng[mag]:
             if bdry == 'open':
@@ -244,14 +244,6 @@ def p4_4(Lspace=LSPACE):
     plt.ylabel(r'Gap ($J$)')
     plt.legend()
     plt.savefig(FIGS_DIR + f'p4_4_L{L}_excitations.png', bbox_inches='tight')
-
-
-    plt.xlabel(r'$h/J$')
-    plt.ylabel(r'$|E_1 - E_0|/J$')
-    plt.legend()
-    plt.savefig(FIGS_DIR + f'p4_4_L{L}_gap.png', bbox_inches='tight')
-
-
 
     gnd_states = evecs[:, :, 0]
     fid = np.abs(np.sum(np.conj(gnd_states) * np.roll(gnd_states, -1, axis=0), axis=-1))[:-1]
@@ -345,14 +337,14 @@ if __name__ == '__main__':
     p4_5_Lspace = np.arange(6, 22, 2)
     p4_7_Lspace = np.arange(5, 22)
 
-    # p4_1(Lspace=p4_1_Lspace)
+    p4_1(Lspace=p4_1_Lspace)
 
-    # p4_2(Lspace=p4_2_Lspace)
+    p4_2(Lspace=p4_2_Lspace)
 
-    # p4_3(Lspace=p4_2_Lspace)
+    p4_3(Lspace=p4_2_Lspace)
 
     p4_4(Lspace=p4_2_Lspace)
 
-    # p4_5(Lspace=p4_5_Lspace)
+    p4_5(Lspace=p4_5_Lspace)
 
-    # p4_7(Lspace=p4_7_Lspace)
+    p4_7(Lspace=p4_7_Lspace)
