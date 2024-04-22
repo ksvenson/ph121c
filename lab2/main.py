@@ -38,7 +38,7 @@ def p5_1():
         img = Image.open(PICS_DIR + filename).convert('L')
         arr = np.asarray(img)
 
-        rank = np.arange(3)
+        rank = np.min(arr.shape) // 2**np.arange(10)
         compress = svd_compress(arr, rank, note=name)
 
         for i, arr in enumerate(compress):
