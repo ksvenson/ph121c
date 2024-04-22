@@ -41,9 +41,11 @@ def p5_1():
         rank = np.min(arr.shape) // 2**np.arange(10)
         compress = svd_compress(arr, rank, note=name)
 
-        for i, arr in enumerate(compress):
-            gray_img = Image.fromarray(arr).convert('L')
-            gray_img.save(COMPRESS_DIR + name + f'_rank{rank[i]}.png')
+        with open(f'p5_1_{name}_norms.txt', 'w') as norm_file:
+            for i, comp_arr in enumerate(compress):
+                print(name + f' rank {rank[i]}: {np.linalg.norm(comp_arr - arr)}', file=norm_file)
+                gray_img = Image.fromarray(comp_arr).convert('L')
+                gray_img.save(COMPRESS_DIR + name + f'_rank{rank[i]}.png')
 
 
 if __name__ == '__main__':
