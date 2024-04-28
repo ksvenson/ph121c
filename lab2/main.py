@@ -81,28 +81,35 @@ def p5_2():
         'Critical Point': np.where(HSPACE == 1)[0][0],
         'Paramagnet': np.where(HSPACE == 1.75)[0][0]
     }
-    fig, axes = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
-    for bdry in ('open', 'loop'):
+    fig = plt.figure(figsize=(15, 10))
+    subfigs = fig.subfigures(nrows=2, ncols=1)
+    for bdry_idx, bdry in enumerate(('open', 'loop')):
+        axes = subfigs[bdry_idx].subplots(nrows=1, ncols=3, sharex=True, sharey=True)
         entropy = {}
-        for i, phase in enumerate(phase_h):
-            entropy[phase] = {}
-            for L in LSPACE:
-                entropy[phase][L] = []
-                data = np.load(EIGS_DIR + f'sparse_eigs_{bdry}_L{L}.npz')
+        for L in LSPACE:
+            data = np.load(EIGS_DIR + f'sparse_eigs_{bdry}_L{L}.npz')
+            entropy[L] = {}
+            for i, phase in enumerate(phase_h):
+                entropy[L][phase] = []
                 gnd_states = data['evecs'][:, :, 0]
-                eng = data['evals'][:, 0]
                 for l in np.arange(1, L):
                     print(f'getting entropy {bdry} L={L} l={l}')
-                    entropy[phase][L].append(get_entropy(gnd_states, l, note=f'gnd_state_{bdry}_L{L}_l{l}')[phase_h[phase]])
+                    entropy[L][phase].append(get_entropy(gnd_states, l, note=f'gnd_state_{bdry}_L{L}_l{l}')[phase_h[phase]])
 
-                axes[i].plot(np.arange(1, L), entropy[phase][L], label=rf'$L={L}$')
-                axes[i].set_xlabel(r'$\ell$')
-            axes[i].set_title(phase + rf': $h/J={HSPACE[phase_h[phase]]}$')
-
+                axes[i].plot(np.arange(1, L), entropy[L][phase], label=rf'$L={L}$')
+                axes[i].set_ylim([0, 1])
+                if bdry_idx == 0:
+                    axes[i].set_title(phase + rf': $h/J={HSPACE[phase_h[phase]]}$')
+                if bdry_idx == 1:
+                    axes[i].set_xlabel(r'$\ell$')
+                handles, labels = axes[0].get_legend_handles_labels()
         axes[0].set_ylabel(r'$S$')
-        handles, labels = axes[0].get_legend_handles_labels()
-        fig.legend(handles, labels, **LEGEND_OPTIONS)
-        fig.savefig(FIGS_DIR + 'entropy.png', **FIG_SAVE_OPTIONS)
+
+    subfigs[0].suptitle(f'Open Boundary')
+    subfigs[1].suptitle(f'Periodic Boundary')
+
+    fig.legend(handles, labels, **LEGEND_OPTIONS)
+    fig.savefig(FIGS_DIR + 'entropy.png', **FIG_SAVE_OPTIONS)
 
 
 
