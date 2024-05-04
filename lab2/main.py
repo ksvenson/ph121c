@@ -5,6 +5,7 @@ from PIL import Image
 import os
 
 import utility
+from lab1 import main as l1main
 
 PICS_DIR = './pics/'
 COMPRESS_DIR = './compress_pics/'
@@ -13,10 +14,11 @@ FIGS_DIR = './figs/'
 EIGS_DIR = '../lab1/data/'
 
 HSPACE = np.linspace(0, 2, 17)
-LSPACE = np.arange(5, 13)
+LSPACE = np.arange(5, 21)
 
 LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
 FIG_SAVE_OPTIONS = {'bbox_inches': 'tight'}
+
 
 @utility.cache('npz', CACHE_DIR + 'svd')
 def get_svd(arr, note=None):
@@ -41,7 +43,10 @@ def svd_compress(arr, rank, note=None):
 
 def get_entropy(states, l, note=None):
     L = int(np.log2(states.shape[-1]))
-    M = states.reshape(states.shape[0], 2**l, 2**(L-l))
+    if len(states.shape) == 2:
+        M = states.reshape(states.shape[0], 2**l, 2**(L-l))
+    elif len(states.shape) == 1:
+        M = states.reshape(2**l, 2**(L-l))
     svd = get_svd(M, note=note)
     probs = svd['s']**2
     return -np.sum(probs * np.log(probs), axis=-1)
@@ -155,8 +160,30 @@ def p5_2():
     plt.legend()
     plt.savefig(FIGS_DIR + 'entropy_fit.png', **FIG_SAVE_OPTIONS)
 
+    phase = 'Critical Point'
+    bdry = 'loop'
+    h_idx = phase_h[phase]
+    summary = []
+    plt.figure()
+    for L in LSPACE:
+        H = l1main.make_sparse_H(L, hspace=HSPACE, note=f'L{L}')[bdry][h_idx]
+        evals, evecs = sp.sparse.linalg.eigsh(H, k=1, which='LA')
+        state = evecs.flatten()
+        entropy = []
+        for l in np.arange(1, L):
+            entropy.append(get_entropy(state, l=l, note=f'ext_state_loop_{phase}_L{L}_l{l}'))
+        summary.append(entropy[L // 2])
+        plt.plot(np.arange(1, L), entropy, label=rf'$L={L}$')
+    plt.xlabel(r'$\ell$')
+    plt.ylabel('Entanglement Entropy')
+    plt.legend(**LEGEND_OPTIONS)
+    plt.savefig(FIGS_DIR + f'ext_{bdry}_{phase}_entropy.png', **FIG_SAVE_OPTIONS)
 
-
+    plt.figure()
+    plt.plot(LSPACE, summary)
+    plt.xlabel(r'$\ell$')
+    plt.ylabel('Entanglement Entropy')
+    plt.savefig(FIGS_DIR + f'ext_{bdry}_{phase}_entropy_summary.png', **FIG_SAVE_OPTIONS)
 
 
 if __name__ == '__main__':

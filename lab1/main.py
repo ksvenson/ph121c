@@ -108,7 +108,7 @@ def make_sparse_H_sx(L, hspace=HSPACE, note=None):
 
 
 @utility.cache('npz', CACHE_DIR + 'sparse_eigs_sx')
-def sparse_eigs_sx(H, note=None):
+def sparse_eigs_sx(H, which='SA', k=1+num_ext_states, note=None):
     all_evals = []
     all_evecs = []
     for i, blocks in enumerate(H):
@@ -116,7 +116,7 @@ def sparse_eigs_sx(H, note=None):
         all_evals.append([])
         all_evecs.append([])
         for sign, block in enumerate(blocks):
-            evals, evecs = sp.sparse.linalg.eigsh(block, k=1+num_ext_states, which='SA')
+            evals, evecs = sp.sparse.linalg.eigsh(block, k=k, which=which)
             all_evals[i].append(evals)
             all_evecs[i].append(evecs)
     return {'evals': np.array(all_evals), 'evecs': np.array(all_evecs)}
