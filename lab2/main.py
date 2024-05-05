@@ -14,10 +14,17 @@ FIGS_DIR = './figs/'
 EIGS_DIR = '../lab1/data/'
 
 HSPACE = np.linspace(0, 2, 17)
-LSPACE = np.arange(5, 21)
+LSPACE = np.arange(5, 17)
+DENSE_LSPACE = np.arange(8, 13, 2)
 
 LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
 FIG_SAVE_OPTIONS = {'bbox_inches': 'tight'}
+
+PHASE_H = {
+    'Ferromagnet': np.where(HSPACE == 0.25)[0][0],
+    'Critical Point': np.where(HSPACE == 1)[0][0],
+    'Paramagnet': np.where(HSPACE == 1.75)[0][0]
+}
 
 
 @utility.cache('npz', CACHE_DIR + 'svd')
@@ -30,15 +37,21 @@ def get_svd(arr, note=None):
     }
 
 
-def svd_compress(arr, rank, note=None):
+def svd_compress(arr, rank, return_svd=False, svd_idx=None, note=None):
     svd = get_svd(arr, note=note)
+    if svd_idx is not None:
+        for key in svd:
+            svd[key] = svd[key][svd_idx]
     approx_s = []
     for r in rank:
         trun = np.zeros(svd['s'].shape)
         trun[:r] = svd['s'][:r]
         approx_s.append(np.diag(trun))
     approx_s = np.asarray(approx_s)
-    return svd['U'] @ approx_s @ svd['Vh']
+    if not return_svd:
+        return svd['U'] @ approx_s @ svd['Vh']
+    else:
+        return svd['U'], svd['s'], svd['Vh'], approx_s
 
 
 def get_entropy(states, l, note=None):
@@ -82,15 +95,10 @@ def p5_1():
         if i == 0:
             axes[i].set_ylabel('Frobenius Norm')
         # axes[i].set_yscale('log')
-    fig.savefig(FIGS_DIR + 'frobenius.png')
+    fig.savefig(FIGS_DIR + 'frobenius.png', FIG_SAVE_OPTIONS)
 
 
 def p5_2():
-    phase_h = {
-        'Ferromagnet': np.where(HSPACE == 0.25)[0][0],
-        'Critical Point': np.where(HSPACE == 1)[0][0],
-        'Paramagnet': np.where(HSPACE == 1.75)[0][0]
-    }
     fig = plt.figure(figsize=(15, 10))
     subfigs = fig.subfigures(nrows=2, ncols=1)
     entropy = {}
@@ -99,18 +107,18 @@ def p5_2():
         axes = subfigs[bdry_idx].subplots(nrows=1, ncols=3, sharex=True, sharey=True)
         for L in LSPACE:
             data = np.load(EIGS_DIR + f'sparse_eigs_{bdry}_L{L}.npz')
+            gnd_states = data['evecs'][:, :, 0]
             entropy[bdry][L] = {}
-            for i, phase in enumerate(phase_h):
+            for i, phase in enumerate(PHASE_H):
                 entropy[bdry][L][phase] = []
-                gnd_states = data['evecs'][:, :, 0]
                 for l in np.arange(1, L):
                     print(f'getting entropy {bdry} L={L} l={l}')
-                    entropy[bdry][L][phase].append(get_entropy(gnd_states, l, note=f'gnd_state_{bdry}_L{L}_l{l}')[phase_h[phase]])
+                    entropy[bdry][L][phase].append(get_entropy(gnd_states, l, note=f'gnd_state_{bdry}_L{L}_l{l}')[PHASE_H[phase]])
 
                 axes[i].plot(np.arange(1, L), entropy[bdry][L][phase], label=rf'$L={L}$')
                 axes[i].set_ylim([0, 1])
                 if bdry_idx == 0:
-                    axes[i].set_title(phase + rf': $h/J={HSPACE[phase_h[phase]]}$')
+                    axes[i].set_title(phase + rf': $h/J={HSPACE[PHASE_H[phase]]}$')
                 if bdry_idx == 1:
                     axes[i].set_xlabel(r'$\ell$')
                 handles, labels = axes[0].get_legend_handles_labels()
@@ -124,7 +132,7 @@ def p5_2():
     summary = {}
     for bdry in entropy:
         summary[bdry] = {}
-        for phase in phase_h:
+        for phase in PHASE_H:
             summary[bdry][phase] = []
             for L in entropy[bdry]:
                 summary[bdry][phase].append(entropy[bdry][L][phase][L // 2])
@@ -136,7 +144,7 @@ def p5_2():
         for i, phase in enumerate(summary[bdry]):
             axes[i].plot(LSPACE, summary[bdry][phase])
             if bdry_idx == 0:
-                axes[i].set_title(phase + rf': $h/J={HSPACE[phase_h[phase]]}$')
+                axes[i].set_title(phase + rf': $h/J={HSPACE[PHASE_H[phase]]}$')
             if bdry_idx == 1:
                 axes[i].set_xlabel(r'$L$')
         axes[0].set_ylabel(r'$S(L/2, L)$')
@@ -162,7 +170,7 @@ def p5_2():
 
     phase = 'Critical Point'
     bdry = 'loop'
-    h_idx = phase_h[phase]
+    h_idx = PHASE_H[phase]
     summary = []
     plt.figure()
     for L in LSPACE:
@@ -186,7 +194,42 @@ def p5_2():
     plt.savefig(FIGS_DIR + f'ext_{bdry}_{phase}_entropy_summary.png', **FIG_SAVE_OPTIONS)
 
 
+def p5_3():
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    for L in LSPACE:
+        data = np.load(EIGS_DIR + f'sparse_eigs_open_L{L}.npz')
+        gnd_states = data['evecs'][:, :, 0]
+        evals = data['evals'][:, 0]
+        rank = np.arange(1, 2**(L//2) + 1)
+        all_ham = l1main.make_sparse_H(L, note=f'L{L}')['open']
+        for phase_idx, phase in enumerate(PHASE_H):
+            state = gnd_states[PHASE_H[phase]]
+            ham = all_ham[PHASE_H[phase]]
+            M = state.reshape(2**(L//2), 2**(L - (L//2)))
+            U, s, Vh, trun = svd_compress(M, rank, return_svd=True, svd_idx=PHASE_H[phase], note=f'gnd_state_open_L{L}_l{L//2}')
+            trun_vals = np.diagonal(trun, axis1=1, axis2=2).T
+            trun_M = U @ trun @ Vh
+            dk = np.linalg.norm(trun_M - M, axis=(1, 2))
+            renorm = np.sum(trun_vals**2, axis=0)
+
+            uv_states = np.array([np.kron(U[:, idx], Vh[idx].conj()) for idx in range(len(s))]).T
+
+            trun_states = uv_states @ trun_vals
+            trun_eng = np.diag(trun_states.conj().T @ ham @ trun_states) / renorm
+
+            axes[phase_idx].plot(dk, np.abs(evals[PHASE_H[phase]] - trun_eng), label=rf'$L={L}$')
+            axes[phase_idx].set_title(phase + rf': $h/J={HSPACE[PHASE_H[phase]]}$')
+            axes[phase_idx].set_xlabel(rf'$d(k)$')
+
+    axes[0].set_ylabel('$\Delta E$')
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels)
+    fig.savefig(FIGS_DIR + 'p5_3_schmidt_decomp.png', **FIG_SAVE_OPTIONS)
+
+
 if __name__ == '__main__':
     # p5_1()
 
-    p5_2()
+    # p5_2()
+
+    p5_3()
