@@ -10,12 +10,12 @@ from lab1 import main as l1main
 PICS_DIR = './pics/'
 COMPRESS_DIR = './compress_pics/'
 CACHE_DIR = './data/'
-MPS_CACHE_DIR = '.MPS_data/'
+MPS_CACHE_DIR = './MPS_data/'
 FIGS_DIR = './figs/'
 EIGS_DIR = '../lab1/data/'
 
 HSPACE = np.linspace(0, 2, 17)
-LSPACE = np.arange(5, 17)
+LSPACE = np.arange(5, 15)
 DENSE_LSPACE = np.arange(8, 13, 2)
 
 LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
@@ -73,25 +73,40 @@ def entropy_fit(L):
 
 
 def MPS_helper(arr, k, A_counter, L, output):
-    if len(arr.shape) == 1:
-        M = arr.reshape(2, 2**(L-1))
-    else:
-        M = arr.reshape(arr.shape[0]*2, arr.shape[1] // 2)
+    M = arr.reshape(arr.shape[0]*2, arr.shape[1] // 2)
     U, s, Vh = np.linalg.svd(M, full_matrices=False)
 
-    A = U[:, :min(k, U.shape[1])]
-    W = s[:min(k, s.shape[0]), np.newaxis] * Vh[:min(k, Vh.shape[0])]
+    A = U[:, :k].reshape(2, U.shape[0] // 2, min(k, U.shape[1]))
     output.append(A)
+
+    W = s[:k, np.newaxis] * Vh[:k]
     if A_counter == L-1:
-        output.append(W)
+        return W
     else:
-        MPS_helper(W, k, A_counter+1, L, output)
+        return MPS_helper(W, k, A_counter+1, L, output)
 
 
-def make_MPS(state, k, L):
+@utility.cache('pkl', MPS_CACHE_DIR + 'mps')
+def make_MPS(state, k, L, note=None):
     output = []
-    MPS_helper(state, k, 1, L, output)
-    return output
+    M = state.reshape(2, 2**(L-1))
+    U, s, Vh = np.linalg.svd(M, full_matrices=False)
+    A1 = U
+    W = s[:k, np.newaxis] * Vh[:k]
+
+    AL = MPS_helper(W, k, 2, L, output)
+    return A1, output, AL
+
+
+def virtual_contract(A1, A, AL, L):
+    # ith spin is given by the ith bit in `L`, left to right
+    output_state = []
+    for state in range(2**L):
+        output = A1[(state >> (L-1)) & 1]
+        for i, mat in enumerate(A):
+            output = output @ mat[(state >> (L-i-2)) & 1]
+        output_state.append(output @ AL[:, state & 1])
+    return np.array(output_state)
 
 
 def p5_1():
@@ -304,20 +319,37 @@ def p5_5():
         'crit': np.where(HSPACE == 1)[0][0],
         'close': np.where(HSPACE == 1.25)[0][0]
     }
+    bdry = 'open'
 
     for phase in MPS_H:
         for L in LSPACE:
-            eigs = np.load(EIGS_DIR + f'sparse_eigs_open_L{L}.npz')
+            eigs = np.load(EIGS_DIR + f'sparse_eigs_{bdry}_L{L}.npz')
             evecs = eigs['evecs'][MPS_H[phase]]
             evals = eigs['evals'][MPS_H[phase]]
             gnd_state = evecs[:, 0]
-            mps = make_MPS(gnd_state, 3, L)
+            for k in 2**np.arange(2, L//2):
+                A1, A, AL = make_MPS(gnd_state, k, L, note=f'{phase}_{bdry}_L{L}_k{k}')
 
-            print(mps)
-            for tensor in mps:
-                print(tensor.shape)
+                mps_state = virtual_contract(A1, A, AL, L)
 
-            quit()
+                # print(np.sum(gnd_state.conj() * gnd_state))
+
+                # print(np.sum(mps_state.conj() * mps_state))
+
+                # print(gnd_state[:5])
+                # print(mps_state[::-1][:5])
+
+                overlap = np.sum(mps_state.conj() * gnd_state[::-1])
+                print(overlap)
+                overlap = np.sum(mps_state.conj() * gnd_state)
+                print(overlap)
+                print('-'*50)
+
+
+                # print(A1.shape)
+                # for tensor in A:
+                #     print(tensor.shape)
+                # print(AL.shape)
 
 
 if __name__ == '__main__':
