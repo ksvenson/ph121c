@@ -10,6 +10,7 @@ from lab1 import main as l1main
 PICS_DIR = './pics/'
 COMPRESS_DIR = './compress_pics/'
 CACHE_DIR = './data/'
+MPS_CACHE_DIR = '.MPS_data/'
 FIGS_DIR = './figs/'
 EIGS_DIR = '../lab1/data/'
 
@@ -69,6 +70,27 @@ def entropy_fit(L):
     def fit(l, scale, offset):
         return (scale / 3) * np.log((L / np.pi) * np.sin(np.pi * l / L)) + offset
     return fit
+
+
+def MPS_helper(arr, k, A_counter, L, output):
+    if len(arr.shape) == 1:
+        M = arr.reshape(2, 2**(L-1))
+    else:
+        M = arr.reshape(arr.shape[0]*2, arr.shape[1] // 2)
+    U, s, Vh = np.linalg.svd(M, full_matrices=False)
+
+    A = U[:, :min(k, U.shape[1])]
+    W = s[:min(k, s.shape[0]), np.newaxis] * Vh[:min(k, Vh.shape[0])]
+    output.append(A)
+    if A_counter == L-1:
+        output.append(W)
+    else:
+        MPS_helper(W, k, A_counter+1, L, output)
+
+
+def MPS(state, k, L):
+    output = []
+    M = state.reshape(min(k, 2), )
 
 
 def p5_1():
@@ -277,14 +299,27 @@ def p5_4():
 
 
 def p5_5():
-    pass
+    MPS_H = {
+        'crit': np.where(HSPACE == 1)[0][0],
+        'close': np.where(HSPACE == 1.25)[0][0]
+    }
+
+    for phase in MPS_H:
+        for L in LSPACE:
+            eigs = np.load(EIGS_DIR + f'sparse_eigs_open_L{L}.npz')
+            evecs = eigs['evecs'][MPS_H[phase]]
+            evals = eigs['evals'][MPS_H[phase]]
+            gnd_state = evecs[:, 0]
+            print(gnd_state.shape)
 
 
 if __name__ == '__main__':
     # p5_1()
 
-    p5_2()
+    # p5_2()
 
-    p5_3()
+    # p5_3()
 
-    p5_4()
+    # p5_4()
+
+    p5_5()
