@@ -95,7 +95,7 @@ def p5_1():
         if i == 0:
             axes[i].set_ylabel('Frobenius Norm')
         # axes[i].set_yscale('log')
-    fig.savefig(FIGS_DIR + 'frobenius.png', FIG_SAVE_OPTIONS)
+    fig.savefig(FIGS_DIR + 'p5_1_frobenius.png', **FIG_SAVE_OPTIONS)
 
 
 def p5_2():
@@ -127,7 +127,7 @@ def p5_2():
     subfigs[0].suptitle(f'Open Boundary')
     subfigs[1].suptitle(f'Periodic Boundary')
     fig.legend(handles, labels, **LEGEND_OPTIONS)
-    fig.savefig(FIGS_DIR + 'entropy.png', **FIG_SAVE_OPTIONS)
+    fig.savefig(FIGS_DIR + 'p5_2_entropy.png', **FIG_SAVE_OPTIONS)
 
     summary = {}
     for bdry in entropy:
@@ -151,7 +151,7 @@ def p5_2():
 
     subfigs[0].suptitle(f'Open Boundary')
     subfigs[1].suptitle(f'Periodic Boundary')
-    fig.savefig(FIGS_DIR + 'entropy_summary.png', **FIG_SAVE_OPTIONS)
+    fig.savefig(FIGS_DIR + 'p5_2_entropy_summary.png', **FIG_SAVE_OPTIONS)
 
     L_max = LSPACE[-1]
     fit_data = entropy['loop'][L_max]['Critical Point']
@@ -166,9 +166,9 @@ def p5_2():
     plt.xlabel(r'$\ell$')
     plt.ylabel('Entanglement Entropy')
     plt.legend()
-    plt.savefig(FIGS_DIR + 'entropy_fit.png', **FIG_SAVE_OPTIONS)
+    plt.savefig(FIGS_DIR + 'p5_2_entropy_fit.png', **FIG_SAVE_OPTIONS)
 
-    phase = 'Critical Point'
+    phase = 'Ferromagnet'
     bdry = 'loop'
     h_idx = PHASE_H[phase]
     summary = []
@@ -185,13 +185,13 @@ def p5_2():
     plt.xlabel(r'$\ell$')
     plt.ylabel('Entanglement Entropy')
     plt.legend(**LEGEND_OPTIONS)
-    plt.savefig(FIGS_DIR + f'ext_{bdry}_{phase}_entropy.png', **FIG_SAVE_OPTIONS)
+    plt.savefig(FIGS_DIR + f'p5_2_ext_{bdry}_{phase}_entropy.png', **FIG_SAVE_OPTIONS)
 
     plt.figure()
     plt.plot(LSPACE, summary)
-    plt.xlabel(r'$\ell$')
+    plt.xlabel(r'$L$')
     plt.ylabel('Entanglement Entropy')
-    plt.savefig(FIGS_DIR + f'ext_{bdry}_{phase}_entropy_summary.png', **FIG_SAVE_OPTIONS)
+    plt.savefig(FIGS_DIR + f'p5_2_ext_{bdry}_{phase}_entropy_summary.png', **FIG_SAVE_OPTIONS)
 
 
 def p5_3():
@@ -223,13 +223,68 @@ def p5_3():
 
     axes[0].set_ylabel('$\Delta E$')
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels)
+    fig.legend(handles, labels, **LEGEND_OPTIONS)
     fig.savefig(FIGS_DIR + 'p5_3_schmidt_decomp.png', **FIG_SAVE_OPTIONS)
+
+
+def p5_4():
+    phase = 'Paramagnet'
+    bdry = 'loop'
+    degen_margin = 1e-5
+    num_states = 3
+
+    fig, axes = plt.subplots(1, num_states, sharex=True, sharey=True, figsize=(5 * num_states, 5))
+    engs = []
+    for L in DENSE_LSPACE:
+        eigs = np.load(CACHE_DIR + f'dense_eigs_{bdry}_L{L}.npz')
+        evecs = eigs['evecs'][PHASE_H[phase]]
+        evals = eigs['evals'][PHASE_H[phase]]
+
+        sort_idx = np.argsort(evals)
+        evals = np.real(evals[sort_idx])
+        evecs = evecs[:, sort_idx]
+
+        all_mid_idx = np.argsort(np.abs(evals))
+        mid_idx = []
+        for idx in all_mid_idx:
+            if np.abs(evals[idx] - evals[idx + 1]) > degen_margin and np.abs(evals[idx] - evals[idx - 1]) > degen_margin:
+                mid_idx.append(idx)
+            if len(mid_idx) >= num_states:
+                break
+        mid_idx = np.array(mid_idx)
+        mid_idx_sort = np.argsort(evals[mid_idx])
+        mid_idx = mid_idx[mid_idx_sort]
+        engs.append(evals[mid_idx])
+        states = evecs[:, mid_idx].T
+
+        entropy = []
+        for l in np.arange(1, L):
+            entropy.append(get_entropy(states, l=l, note=f'mid_state_{bdry}_{phase}_L{L}_l{l}'))
+        entropy = np.array(entropy).T
+
+        for j, ax in enumerate(axes):
+            ax.plot(np.arange(1, L), entropy[j], label=rf'$L={L}$')
+            ax.set_xlabel(r'$\ell$')
+
+    engs = np.array(engs)
+    for i, ax in enumerate(axes):
+        ax.set_title(r'$E_\text{avg}=$' + rf'${round(np.mean(engs, axis=0)[i], 3)}$')
+
+    axes[0].set_ylabel('Entanglement Entropy')
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, **LEGEND_OPTIONS)
+    fig.savefig(FIGS_DIR + f'p5_4_{phase}_{bdry}_mid_state_entropy.png', **FIG_SAVE_OPTIONS)
+
+
+def p5_5():
+    pass
 
 
 if __name__ == '__main__':
     # p5_1()
 
-    # p5_2()
+    p5_2()
 
     p5_3()
+
+    p5_4()
