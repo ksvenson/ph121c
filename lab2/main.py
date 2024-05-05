@@ -88,9 +88,10 @@ def MPS_helper(arr, k, A_counter, L, output):
         MPS_helper(W, k, A_counter+1, L, output)
 
 
-def MPS(state, k, L):
+def make_MPS(state, k, L):
     output = []
-    M = state.reshape(min(k, 2), )
+    MPS_helper(state, k, 1, L, output)
+    return output
 
 
 def p5_1():
@@ -310,7 +311,13 @@ def p5_5():
             evecs = eigs['evecs'][MPS_H[phase]]
             evals = eigs['evals'][MPS_H[phase]]
             gnd_state = evecs[:, 0]
-            print(gnd_state.shape)
+            mps = make_MPS(gnd_state, 3, L)
+
+            print(mps)
+            for tensor in mps:
+                print(tensor.shape)
+
+            quit()
 
 
 if __name__ == '__main__':
