@@ -15,7 +15,7 @@ FIGS_DIR = './figs/'
 EIGS_DIR = '../lab1/data/'
 
 HSPACE = np.linspace(0, 2, 17)
-LSPACE = np.arange(5, 17)
+LSPACE = np.arange(5, 21)
 DENSE_LSPACE = np.arange(8, 13, 2)
 
 LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
@@ -135,7 +135,6 @@ def mps_norm(A1, A, AL, L):
     result = mps_norm_helper(A, A1, L-1, L)
     prod = np.array([np.sum(col.conj() * (result @ col)) for col in AL.T])
     return np.sum(prod)
-
 
 
 def p5_1():
@@ -372,7 +371,6 @@ def p5_5():
     fig, axes = plt.subplots(1, 2, sharey=True, sharex=True, figsize=(10, 5))
     for phase_idx, phase in enumerate(MPS_H):
         for L in LSPACE:
-            print(f'L={L}')
             eigs = np.load(EIGS_DIR + f'sparse_eigs_{bdry}_L{L}.npz')
             evecs = eigs['evecs'][MPS_H[phase]]
             evals = eigs['evals'][MPS_H[phase]]
@@ -388,7 +386,6 @@ def p5_5():
                 mps_state = virtual_contract(A1, A, AL, L, note=f'contract_{phase}_{bdry}_L{L}_k{k}')
                 overlap.append(np.sum(mps_state.conj() * gnd_state))
                 norm.append(mps_norm(A1, A, AL, L))
-            print(norm)
             axes[phase_idx].plot(k_space, overlap, label=rf'$L={L}$')
             axes[phase_idx].set_xlabel(r'$k$')
             axes[phase_idx].set_xscale('log')
@@ -403,28 +400,13 @@ def p5_5():
     plt.savefig(FIGS_DIR + 'p5_5_mps_overlap.png', **FIG_SAVE_OPTIONS)
 
 
-def p5_5_1():
-    bdry = 'open'
-
-    for phase_idx, phase in enumerate(MPS_H):
-        for L in LSPACE:
-            print(f'L={L}')
-            eigs = np.load(EIGS_DIR + f'sparse_eigs_{bdry}_L{L}.npz')
-            evecs = eigs['evecs'][MPS_H[phase]]
-            evals = eigs['evals'][MPS_H[phase]]
-            k_space = 2**np.arange(1, L//2)
-
-
-
 if __name__ == '__main__':
-    # p5_1()
+    p5_1()
 
-    # p5_2()
+    p5_2()
 
-    # p5_3()
+    p5_3()
 
-    # p5_4()
+    p5_4()
 
     p5_5()
-
-    # p5_5_1()
