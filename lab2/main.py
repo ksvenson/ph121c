@@ -15,7 +15,7 @@ FIGS_DIR = './figs/'
 EIGS_DIR = '../lab1/data/'
 
 HSPACE = np.linspace(0, 2, 17)
-LSPACE = np.arange(5, 21)
+LSPACE = np.arange(5, 13)
 DENSE_LSPACE = np.arange(8, 13, 2)
 
 LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
@@ -344,18 +344,33 @@ def p5_5():
     }
     bdry = 'open'
 
-    for phase in MPS_H:
+    fig, axes = plt.subplots(1, 2, sharey=True, sharex=True, figsize=(10, 5))
+    for phase_idx, phase in enumerate(MPS_H):
         for L in LSPACE:
             eigs = np.load(EIGS_DIR + f'sparse_eigs_{bdry}_L{L}.npz')
             evecs = eigs['evecs'][MPS_H[phase]]
             evals = eigs['evals'][MPS_H[phase]]
             gnd_state = evecs[:, 0]
-            for k in 2**np.arange(2, L//2):
+            k_space = 2**np.arange(2, L//2)
+            overlap = []
+            # probably inefficient to iterate through `k` like this. Lower `k` does the same calculations as large `k`,
+            # just throws away more values. But just want to get this working for now before I consider making it
+            # faster.
+            for k in k_space:
                 A1, A, AL = make_MPS(gnd_state, k, L, note=f'{phase}_{bdry}_L{L}_k{k}')
-
                 mps_state = virtual_contract(A1, A, AL, L)
+                overlap.append(np.sum(mps_state.conj() * gnd_state))
+            axes[phase_idx].plot(k_space, overlap, label=rf'$L={L}$')
+            axes[phase_idx].set_xlabel(r'$k$')
 
-                overlap = np.sum(mps_state.conj() * gnd_state)
+    title_help = HSPACE[MPS_H['crit']]
+    axes[0].set_title(rf'Critical Point: $h/J={title_help}$')
+    title_help = HSPACE[MPS_H['close']]
+    axes[1].set_title(rf'$h/j={title_help}$')
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, **LEGEND_OPTIONS)
+    plt.savefig(FIGS_DIR + 'p5_5_mps_overlap.png', **FIG_SAVE_OPTIONS)
+
 
 if __name__ == '__main__':
     # p5_1()
@@ -364,6 +379,6 @@ if __name__ == '__main__':
 
     # p5_3()
 
-    p5_4()
+    # p5_4()
 
-    # p5_5()
+    p5_5()
