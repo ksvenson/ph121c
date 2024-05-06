@@ -15,7 +15,7 @@ FIGS_DIR = './figs/'
 EIGS_DIR = '../lab1/data/'
 
 HSPACE = np.linspace(0, 2, 17)
-LSPACE = np.arange(5, 15)
+LSPACE = np.arange(5, 21)
 DENSE_LSPACE = np.arange(8, 13, 2)
 
 LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
@@ -196,8 +196,8 @@ def p5_2():
     popt, pcov = sp.optimize.curve_fit(entropy_fit(L_max), np.arange(1, L_max), fit_data, p0=(1, 0))
     std = np.sqrt(np.diag(pcov))
     with open('p5_2_fit_results.txt', 'w') as f:
-        print(f'scale: {round(popt[0], 5)} \pm {round(std[0], 3)}', file=f)
-        print(f'offset: {round(popt[1], 5)} \pm {round(std[1], 3)}', file=f)
+        print(f'scale: {popt[0]} \pm {std[0]}', file=f)
+        print(f'offset: {popt[1]} \pm {std[1]}', file=f)
     plt.figure()
     plt.plot(np.arange(1, L_max), fit_data, label='Measured E.E.')
     plt.plot(np.arange(1, L_max), entropy_fit(L_max)(np.arange(1, L_max), *popt), label='Equation 26 Fit')
@@ -206,7 +206,7 @@ def p5_2():
     plt.legend()
     plt.savefig(FIGS_DIR + 'p5_2_entropy_fit.png', **FIG_SAVE_OPTIONS)
 
-    phase = 'Ferromagnet'
+    phase = 'Paramagnet'
     bdry = 'loop'
     h_idx = PHASE_H[phase]
     summary = []
@@ -228,13 +228,16 @@ def p5_2():
     plt.figure()
     plt.plot(LSPACE, summary)
     plt.xlabel(r'$L$')
-    plt.ylabel('Entanglement Entropy')
+    plt.ylabel('$S(L/2, L)$')
     plt.savefig(FIGS_DIR + f'p5_2_ext_{bdry}_{phase}_entropy_summary.png', **FIG_SAVE_OPTIONS)
 
 
 def p5_3():
+    fig_dk, axes_dk = plt.subplots(1, 3, figsize=(15, 5))
+    fig_de, axes_de = plt.subplots(1, 3, figsize=(15, 5))
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     for L in LSPACE:
+        print(f'L={L}')
         data = np.load(EIGS_DIR + f'sparse_eigs_open_L{L}.npz')
         gnd_states = data['evecs'][:, :, 0]
         evals = data['evals'][:, 0]
@@ -255,18 +258,38 @@ def p5_3():
             trun_states = uv_states @ trun_vals
             trun_eng = np.diag(trun_states.conj().T @ ham @ trun_states) / renorm
 
+            axes_dk[phase_idx].plot(rank, dk, label=rf'$L={L}$')
+            axes_dk[phase_idx].set_title(phase + rf': $h/J={HSPACE[PHASE_H[phase]]}$')
+            axes_dk[phase_idx].set_xlabel(rf'Rank')
+            axes_dk[phase_idx].set_xscale('log')
+            axes_dk[phase_idx].set_yscale('log')
+
+            axes_de[phase_idx].plot(rank, np.abs(evals[PHASE_H[phase]] - trun_eng), label=rf'$L={L}$')
+            axes_de[phase_idx].set_title(phase + rf': $h/J={HSPACE[PHASE_H[phase]]}$')
+            axes_de[phase_idx].set_xlabel(rf'Rank')
+            axes_de[phase_idx].set_xscale('log')
+            axes_de[phase_idx].set_yscale('log')
+
             axes[phase_idx].plot(dk, np.abs(evals[PHASE_H[phase]] - trun_eng), label=rf'$L={L}$')
             axes[phase_idx].set_title(phase + rf': $h/J={HSPACE[PHASE_H[phase]]}$')
             axes[phase_idx].set_xlabel(rf'$d(k)$')
 
+    axes_dk[0].set_ylabel('$d(k)$')
+    axes_de[0].set_ylabel('$\Delta E$')
     axes[0].set_ylabel('$\Delta E$')
+
     handles, labels = axes[0].get_legend_handles_labels()
+    fig_dk.legend(handles, labels, **LEGEND_OPTIONS)
+    fig_de.legend(handles, labels, **LEGEND_OPTIONS)
     fig.legend(handles, labels, **LEGEND_OPTIONS)
+
+    fig_dk.savefig(FIGS_DIR + 'p5_3_schmidt_decomp_dk.png', **FIG_SAVE_OPTIONS)
+    fig_de.savefig(FIGS_DIR + 'p5_3_schmidt_decomp_de.png', **FIG_SAVE_OPTIONS)
     fig.savefig(FIGS_DIR + 'p5_3_schmidt_decomp.png', **FIG_SAVE_OPTIONS)
 
 
 def p5_4():
-    phase = 'Paramagnet'
+    phase = 'Critical Point'
     bdry = 'loop'
     degen_margin = 1e-5
     num_states = 3
@@ -332,25 +355,7 @@ def p5_5():
 
                 mps_state = virtual_contract(A1, A, AL, L)
 
-                # print(np.sum(gnd_state.conj() * gnd_state))
-
-                # print(np.sum(mps_state.conj() * mps_state))
-
-                # print(gnd_state[:5])
-                # print(mps_state[::-1][:5])
-
-                overlap = np.sum(mps_state.conj() * gnd_state[::-1])
-                print(overlap)
                 overlap = np.sum(mps_state.conj() * gnd_state)
-                print(overlap)
-                print('-'*50)
-
-
-                # print(A1.shape)
-                # for tensor in A:
-                #     print(tensor.shape)
-                # print(AL.shape)
-
 
 if __name__ == '__main__':
     # p5_1()
@@ -359,6 +364,6 @@ if __name__ == '__main__':
 
     # p5_3()
 
-    # p5_4()
+    p5_4()
 
-    p5_5()
+    # p5_5()
