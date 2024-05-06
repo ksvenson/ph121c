@@ -26,6 +26,10 @@ PHASE_H = {
     'Critical Point': np.where(HSPACE == 1)[0][0],
     'Paramagnet': np.where(HSPACE == 1.75)[0][0]
 }
+MPS_H = {
+    'crit': np.where(HSPACE == 1)[0][0],
+    'close': np.where(HSPACE == 1.25)[0][0]
+}
 
 
 @utility.cache('npz', CACHE_DIR + 'svd')
@@ -104,7 +108,8 @@ def make_MPS(state, k, L, note=None):
     return A1, output, AL
 
 
-def virtual_contract(A1, A, AL, L):
+@utility.cache('npy', MPS_CACHE_DIR + 'mps_state')
+def virtual_contract(A1, A, AL, L, note=None):
     # ith spin is given by the ith bit in `L`, left to right
     output_state = []
     for state in range(2**L):
@@ -113,6 +118,24 @@ def virtual_contract(A1, A, AL, L):
             output = output @ mat[(state >> (L-i-2)) & 1]
         output_state.append(output @ AL[:, state & 1])
     return np.array(output_state)
+
+
+def mps_norm_helper(A, A1, A_count, L):
+    if A_count == 1:
+        prod = np.array([np.outer(row.conj(), row) for row in A1])
+        sum = np.sum(prod, axis=0)
+        return sum
+    else:
+        next_A = A[A_count - L]
+        next_A_dag = np.transpose(next_A, (0, 2, 1)).conj()
+        return np.sum(next_A_dag @ mps_norm_helper(A, A1, A_count-1, L) @ next_A, axis=0)
+
+
+def mps_norm(A1, A, AL, L):
+    result = mps_norm_helper(A, A1, L-1, L)
+    prod = np.array([np.sum(col.conj() * (result @ col)) for col in AL.T])
+    return np.sum(prod)
+
 
 
 def p5_1():
@@ -344,10 +367,6 @@ def p5_4():
 
 
 def p5_5():
-    MPS_H = {
-        'crit': np.where(HSPACE == 1)[0][0],
-        'close': np.where(HSPACE == 1.25)[0][0]
-    }
     bdry = 'open'
 
     fig, axes = plt.subplots(1, 2, sharey=True, sharex=True, figsize=(10, 5))
@@ -360,25 +379,41 @@ def p5_5():
             gnd_state = evecs[:, 0]
             k_space = 2**np.arange(1, L//2)
             overlap = []
+            norm = []
             # probably inefficient to iterate through `k` like this. Lower `k` does the same calculations as large `k`,
             # just throws away more values. But just want to get this working for now before I consider making it
             # faster.
             for k in k_space:
                 A1, A, AL = make_MPS(gnd_state, k, L, note=f'{phase}_{bdry}_L{L}_k{k}')
-                mps_state = virtual_contract(A1, A, AL, L)
+                mps_state = virtual_contract(A1, A, AL, L, note=f'contract_{phase}_{bdry}_L{L}_k{k}')
                 overlap.append(np.sum(mps_state.conj() * gnd_state))
+                norm.append(mps_norm(A1, A, AL, L))
+            print(norm)
             axes[phase_idx].plot(k_space, overlap, label=rf'$L={L}$')
             axes[phase_idx].set_xlabel(r'$k$')
-            # axes[phase_idx].set_xscale('log')
+            axes[phase_idx].set_xscale('log')
 
     title_help = HSPACE[MPS_H['crit']]
     axes[0].set_title(rf'Critical Point: $h/J={title_help}$')
     title_help = HSPACE[MPS_H['close']]
-    axes[1].set_title(rf'$h/j={title_help}$')
+    axes[1].set_title(rf'$h/J={title_help}$')
     axes[0].set_ylabel(r'$\langle \tilde{\psi}_\text{gs}(k) | \psi_\text{gs}\rangle$')
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, **LEGEND_OPTIONS)
     plt.savefig(FIGS_DIR + 'p5_5_mps_overlap.png', **FIG_SAVE_OPTIONS)
+
+
+def p5_5_1():
+    bdry = 'open'
+
+    for phase_idx, phase in enumerate(MPS_H):
+        for L in LSPACE:
+            print(f'L={L}')
+            eigs = np.load(EIGS_DIR + f'sparse_eigs_{bdry}_L{L}.npz')
+            evecs = eigs['evecs'][MPS_H[phase]]
+            evals = eigs['evals'][MPS_H[phase]]
+            k_space = 2**np.arange(1, L//2)
+
 
 
 if __name__ == '__main__':
@@ -391,3 +426,5 @@ if __name__ == '__main__':
     # p5_4()
 
     p5_5()
+
+    # p5_5_1()
