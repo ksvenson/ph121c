@@ -15,7 +15,7 @@ FIGS_DIR = './figs/'
 EIGS_DIR = '../lab1/data/'
 
 HSPACE = np.linspace(0, 2, 17)
-LSPACE = np.arange(5, 13)
+LSPACE = np.arange(5, 15)
 DENSE_LSPACE = np.arange(8, 13, 2)
 
 LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
@@ -72,11 +72,20 @@ def entropy_fit(L):
     return fit
 
 
+def reshape_U_to_A(U, k):
+    mask = np.arange(U.shape[0]) % 2
+    assert U.shape[0] % 2 == 0
+    A0 = U[mask == 0, :k]
+    A1 = U[mask == 1, :k]
+    return np.array([A0, A1])
+
+
 def MPS_helper(arr, k, A_counter, L, output):
     M = arr.reshape(arr.shape[0]*2, arr.shape[1] // 2)
     U, s, Vh = np.linalg.svd(M, full_matrices=False)
 
-    A = U[:, :k].reshape(2, U.shape[0] // 2, min(k, U.shape[1]))
+    # A = U[:, :k].reshape(2, U.shape[0] // 2, min(k, U.shape[1]))
+    A = reshape_U_to_A(U, k)
     output.append(A)
 
     W = s[:k, np.newaxis] * Vh[:k]
@@ -86,14 +95,13 @@ def MPS_helper(arr, k, A_counter, L, output):
         return MPS_helper(W, k, A_counter+1, L, output)
 
 
-@utility.cache('pkl', MPS_CACHE_DIR + 'mps')
+# @utility.cache('pkl', MPS_CACHE_DIR + 'mps')
 def make_MPS(state, k, L, note=None):
     output = []
     M = state.reshape(2, 2**(L-1))
     U, s, Vh = np.linalg.svd(M, full_matrices=False)
     A1 = U
     W = s[:k, np.newaxis] * Vh[:k]
-
     AL = MPS_helper(W, k, 2, L, output)
     return A1, output, AL
 
@@ -347,11 +355,12 @@ def p5_5():
     fig, axes = plt.subplots(1, 2, sharey=True, sharex=True, figsize=(10, 5))
     for phase_idx, phase in enumerate(MPS_H):
         for L in LSPACE:
+            print(f'L={L}')
             eigs = np.load(EIGS_DIR + f'sparse_eigs_{bdry}_L{L}.npz')
             evecs = eigs['evecs'][MPS_H[phase]]
             evals = eigs['evals'][MPS_H[phase]]
             gnd_state = evecs[:, 0]
-            k_space = 2**np.arange(2, L//2)
+            k_space = 2**np.arange(1, L//2)
             overlap = []
             # probably inefficient to iterate through `k` like this. Lower `k` does the same calculations as large `k`,
             # just throws away more values. But just want to get this working for now before I consider making it
@@ -362,6 +371,7 @@ def p5_5():
                 overlap.append(np.sum(mps_state.conj() * gnd_state))
             axes[phase_idx].plot(k_space, overlap, label=rf'$L={L}$')
             axes[phase_idx].set_xlabel(r'$k$')
+            axes[phase_idx].set_xscale('log')
 
     title_help = HSPACE[MPS_H['crit']]
     axes[0].set_title(rf'Critical Point: $h/J={title_help}$')
