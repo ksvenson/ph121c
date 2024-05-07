@@ -120,21 +120,30 @@ def virtual_contract(A1, A, AL, L, note=None):
     return np.array(output_state)
 
 
-def mps_norm_helper(A, A1, A_count, L):
+def mps_contract_helper(A, A1, A_count, L, spin_idx=None, operator=None):
     if A_count == 1:
         prod = np.array([np.outer(row.conj(), row) for row in A1])
-        sum = np.sum(prod, axis=0)
-        return sum
+        return np.sum(prod, axis=0)
     else:
-        next_A = A[A_count - L]
-        next_A_dag = np.transpose(next_A, (0, 2, 1)).conj()
-        return np.sum(next_A_dag @ mps_norm_helper(A, A1, A_count-1, L) @ next_A, axis=0)
+        if operator == 'sigmaz' and A_count == spin_idx + 1:
+            middle = mps_contract_helper(A, A1, A_count-2, L, spin_idx=spin_idx, operator=operator)
+        else:
+            next_A = A[A_count - 2]
+            next_A_dag = np.transpose(next_A, (0, 2, 1)).conj()
+            if operator == 'sigmax' and A_count == spin_idx:
+                next_A_dag = next_A_dag[::-1]
+            return np.sum(next_A_dag @ mps_contract_helper(A, A1, A_count-1, L, spin_idx=spin_idx, operator=operator) @ next_A, axis=0)
 
 
 def mps_norm(A1, A, AL, L):
-    result = mps_norm_helper(A, A1, L-1, L)
+    result = mps_contract_helper(A, A1, L-1, L-1)
     prod = np.array([np.sum(col.conj() * (result @ col)) for col in AL.T])
     return np.sum(prod)
+
+
+def mps_sigmaz(A1, A, AL, L, spin_idx):
+    sigmaz = np.array([[1, -1], [-1, 1]])
+    pass
 
 
 def p5_1():
@@ -383,12 +392,18 @@ def p5_5():
             # faster.
             for k in k_space:
                 A1, A, AL = make_MPS(gnd_state, k, L, note=f'{phase}_{bdry}_L{L}_k{k}')
+                print(f'A1: {A1}')
+                for i, arr in enumerate(A):
+                    print(f'A{i+2}: {arr}')
+                print(f'AL: {AL}')
                 mps_state = virtual_contract(A1, A, AL, L, note=f'contract_{phase}_{bdry}_L{L}_k{k}')
                 overlap.append(np.sum(mps_state.conj() * gnd_state))
                 norm.append(mps_norm(A1, A, AL, L))
             axes[phase_idx].plot(k_space, overlap, label=rf'$L={L}$')
             axes[phase_idx].set_xlabel(r'$k$')
             axes[phase_idx].set_xscale('log')
+
+            quit()
 
     title_help = HSPACE[MPS_H['crit']]
     axes[0].set_title(rf'Critical Point: $h/J={title_help}$')
@@ -401,12 +416,12 @@ def p5_5():
 
 
 if __name__ == '__main__':
-    p5_1()
+    # p5_1()
 
-    p5_2()
+    # p5_2()
 
-    p5_3()
+    # p5_3()
 
-    p5_4()
+    # p5_4()
 
     p5_5()
