@@ -6,6 +6,8 @@ import os
 
 import utility
 from lab1 import main as l1main
+from typing import Literal
+
 
 PICS_DIR = './pics/'
 COMPRESS_DIR = './compress_pics/'
@@ -15,7 +17,7 @@ FIGS_DIR = './figs/'
 EIGS_DIR = '../lab1/data/'
 
 HSPACE = np.linspace(0, 2, 17)
-LSPACE = np.arange(5, 21)
+LSPACE = np.arange(5, 14)
 DENSE_LSPACE = np.arange(8, 13, 2)
 
 LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
@@ -31,6 +33,7 @@ MPS_H = {
     'close': np.where(HSPACE == 1.25)[0][0]
 }
 
+operator_type = Literal['sigz', 'sigx']
 
 @utility.cache('npz', CACHE_DIR + 'svd')
 def get_svd(arr, note=None):
@@ -102,7 +105,7 @@ def make_MPS(state, k, L, note=None):
     output = []
     M = state.reshape(2, 2**(L-1))
     U, s, Vh = np.linalg.svd(M, full_matrices=False)
-    A1 = U
+    A1 = U[:, :k]
     W = s[:k, np.newaxis] * Vh[:k]
     AL = MPS_helper(W, k, 2, L, output)
     return A1, output, AL
@@ -120,30 +123,55 @@ def virtual_contract(A1, A, AL, L, note=None):
     return np.array(output_state)
 
 
-def mps_contract_helper(A, A1, A_count, L, spin_idx=None, operator=None):
+def mps_contract_helper(A1, A, A_count, spin_idx=None, operator: operator_type=None):
     if A_count == 1:
-        prod = np.array([np.outer(row.conj(), row) for row in A1])
-        return np.sum(prod, axis=0)
+        A1_star = A1.conj()
+        if operator == 'sigx' and spin_idx == 0:
+            A1_star = A1_star[::-1]
+        prod = np.array([np.outer(A1_star[i], A1[i]) for i in range(2)])
+        if operator == 'sigz' and spin_idx == 0:
+            prod[1] *= -1
     else:
-        if operator == 'sigmaz' and A_count == spin_idx + 1:
-            middle = mps_contract_helper(A, A1, A_count-2, L, spin_idx=spin_idx, operator=operator)
-        else:
-            next_A = A[A_count - 2]
-            next_A_dag = np.transpose(next_A, (0, 2, 1)).conj()
-            if operator == 'sigmax' and A_count == spin_idx:
-                next_A_dag = next_A_dag[::-1]
-            return np.sum(next_A_dag @ mps_contract_helper(A, A1, A_count-1, L, spin_idx=spin_idx, operator=operator) @ next_A, axis=0)
+        next_A = A[A_count - 2]
+        next_A_dag = np.transpose(next_A, (0, 2, 1)).conj()
+        if operator == 'sigx' and spin_idx == A_count - 1:
+            next_A_dag = next_A_dag[::-1]
+        prod = next_A_dag @ mps_contract_helper(A1, A, A_count-1, spin_idx=spin_idx, operator=operator) @ next_A
+        if operator == 'sigz' and (spin_idx == A_count - 1 or spin_idx == A_count - 2):
+            prod[1] *= -1
+    return np.sum(prod, axis=0)
 
 
 def mps_norm(A1, A, AL, L):
-    result = mps_contract_helper(A, A1, L-1, L-1)
+    result = mps_contract_helper(A1, A, L-1)
     prod = np.array([np.sum(col.conj() * (result @ col)) for col in AL.T])
     return np.sum(prod)
 
 
-def mps_sigmaz(A1, A, AL, L, spin_idx):
-    sigmaz = np.array([[1, -1], [-1, 1]])
-    pass
+def mps_sigz(A1, A, AL, L, spin_idx):
+    result = mps_contract_helper(A1, A, L-1, spin_idx=spin_idx, operator='sigz')
+    prod = np.array([np.sum(col.conj() * (result @ col)) for col in AL.T])
+    if spin_idx == L-2:
+        prod[1] *= -1
+    return np.sum(prod)
+
+
+def mps_sigx(A1, A, AL, L, spin_idx):
+    result = mps_contract_helper(A1, A, L-1, spin_idx=spin_idx, operator='sigx')
+    AL_dag = AL.T.conj()
+    if spin_idx == L-1:
+        AL_dag = AL_dag[::-1]
+    prod = np.array([np.sum(AL_dag[i] * (result @ AL[:, i])) for i in range(2)])
+    return np.sum(prod)
+
+
+def mps_eng(A1, A, AL, L, h_J):
+    total = 0
+    for spin_idx in range(L-1):
+        total += -1 * mps_sigz(A1, A, AL, L, spin_idx)
+        total += -1 * h_J * mps_sigx(A1, A, AL, L, spin_idx)
+    total += -1 * h_J * mps_sigx(A1, A, AL, L, L-1)
+    return total / mps_norm(A1, A, AL, L)
 
 
 def p5_1():
@@ -376,43 +404,48 @@ def p5_4():
 
 def p5_5():
     bdry = 'open'
+    keys = ['overlap', 'norm', 'eng', 'eng_err']
+    figs = {}
+    axes = {}
+    for key in keys:
+        figs[key], axes[key] = plt.subplots(1, 2, sharey=True, sharex=True, figsize=(10, 5))
 
-    fig, axes = plt.subplots(1, 2, sharey=True, sharex=True, figsize=(10, 5))
+    data = {}
     for phase_idx, phase in enumerate(MPS_H):
         for L in LSPACE:
             eigs = np.load(EIGS_DIR + f'sparse_eigs_{bdry}_L{L}.npz')
             evecs = eigs['evecs'][MPS_H[phase]]
             evals = eigs['evals'][MPS_H[phase]]
             gnd_state = evecs[:, 0]
-            k_space = 2**np.arange(1, L//2)
-            overlap = []
-            norm = []
-            # probably inefficient to iterate through `k` like this. Lower `k` does the same calculations as large `k`,
-            # just throws away more values. But just want to get this working for now before I consider making it
-            # faster.
+            gnd_eng = evals[0]
+            k_space = 2**np.arange(0, L//2)
+            for key in keys:
+                data[key] = []
             for k in k_space:
                 A1, A, AL = make_MPS(gnd_state, k, L, note=f'{phase}_{bdry}_L{L}_k{k}')
-                print(f'A1: {A1}')
-                for i, arr in enumerate(A):
-                    print(f'A{i+2}: {arr}')
-                print(f'AL: {AL}')
                 mps_state = virtual_contract(A1, A, AL, L, note=f'contract_{phase}_{bdry}_L{L}_k{k}')
-                overlap.append(np.sum(mps_state.conj() * gnd_state))
-                norm.append(mps_norm(A1, A, AL, L))
-            axes[phase_idx].plot(k_space, overlap, label=rf'$L={L}$')
-            axes[phase_idx].set_xlabel(r'$k$')
-            axes[phase_idx].set_xscale('log')
+                data['overlap'].append(np.sum(mps_state.conj() * gnd_state))
+                data['norm'].append(mps_norm(A1, A, AL, L))
+                data['eng'].append(mps_eng(A1, A, AL, L, HSPACE[MPS_H[phase]]))
+                data['eng_err'].append(np.abs(data['eng'][-1] - gnd_eng))
+            for key in data:
+                axes[key][phase_idx].plot(k_space, data[key], label=rf'$L={L}$')
+                axes[key][phase_idx].set_xlabel(r'$k$')
+                axes[key][phase_idx].set_xscale('log')
+                axes[key][phase_idx].set_yscale('log')
+    axes['overlap'][0].set_ylabel(r'Overlap $\langle \tilde{\psi}_\text{gs}(k) | \psi_\text{gs}\rangle$')
+    axes['norm'][0].set_ylabel(r'Normalization $\langle \tilde{\psi}_\text{gs}(k) | \tilde{\psi}_\text{gs}(k)\rangle$')
+    axes['eng'][0].set_ylabel(r'Energy $\langle \tilde{\psi}_\text{gs}(k) | H |\tilde{\psi}_\text{gs}(k)\rangle / \langle \tilde{\psi}_\text{gs}(k) | \tilde{\psi}_\text{gs}(k)\rangle$')
+    axes['eng_err'][0].set_ylabel(r'Energy Error $\Delta E$')
 
-            quit()
-
-    title_help = HSPACE[MPS_H['crit']]
-    axes[0].set_title(rf'Critical Point: $h/J={title_help}$')
-    title_help = HSPACE[MPS_H['close']]
-    axes[1].set_title(rf'$h/J={title_help}$')
-    axes[0].set_ylabel(r'$\langle \tilde{\psi}_\text{gs}(k) | \psi_\text{gs}\rangle$')
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, **LEGEND_OPTIONS)
-    plt.savefig(FIGS_DIR + 'p5_5_mps_overlap.png', **FIG_SAVE_OPTIONS)
+    for key in data:
+        title_help = HSPACE[MPS_H['crit']]
+        axes[key][0].set_title(rf'Critical Point: $h/J={title_help}$')
+        title_help = HSPACE[MPS_H['close']]
+        axes[key][1].set_title(rf'$h/J={title_help}$')
+        handles, labels = axes[key][0].get_legend_handles_labels()
+        figs[key].legend(handles, labels, **LEGEND_OPTIONS)
+        figs[key].savefig(FIGS_DIR + f'p5_5_mps_{key}.png', **FIG_SAVE_OPTIONS)
 
 
 if __name__ == '__main__':
