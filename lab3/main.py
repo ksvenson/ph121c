@@ -11,9 +11,9 @@ FIGS_DIR = './figs/'
 LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
 FIG_SAVE_OPTIONS = {'bbox_inches': 'tight'}
 
-LSPACE = np.arange(8, 9)
+LSPACE = np.arange(2, 3)
 
-FIELD_VALS = {'hx': -1.05, 'hz': 0.5}
+FIELD_VALS = {'hx': 1, 'hz': 0}
 
 
 # @utility.cache('npy', CACHE_DIR + 'dense_H')
@@ -36,6 +36,9 @@ def make_dense_H(L, note=None):
         # h_x field
         flips = np.arange(L)
         H[i ^ (1 << flips), i] += -1 * FIELD_VALS['hx']
+
+        # for flip in range(0, L):
+        #     H[i ^ (1 << flip), i] -= FIELD_VALS['hx']
     return H
 
 
@@ -76,6 +79,30 @@ def rebase_operator(L, op, evecs):
     global_op = np.identity(2**(L-1))
     global_op = np.kron(op, global_op)
     return evecs.T.conj() @ global_op @ evecs
+
+
+def p4_1_debug():
+    for L in LSPACE:
+        ham = make_dense_H(L)
+        eigs = dense_eigs(L, note=f'L{L}')
+        evals = eigs['evals']
+
+        # test_ham = np.load(f'../lab2/data/dense_H_L{L}.npz')['loop'][0]
+        # test_eigs = np.load(f'../lab2/data/dense_eigs_loop_L{L}.npz')
+        # test_evals = test_eigs['evals'][0]
+
+        test_ham = l1main.make_dense_H(L, hspace=[FIELD_VALS['hx']], note=f'DELETE_ME_L{L}_hx{FIELD_VALS["hx"]}')['loop']
+        test_eigs = l1main.dense_eigs(test_ham, hspace=[FIELD_VALS['hx']], note=f'DELETE_ME_L{L}_hx{FIELD_VALS["hx"]}')
+        test_evals = test_eigs['evals'][0]
+
+        evals = np.sort(evals)
+        test_evals = np.sort(test_evals)
+
+        print(f'ham:\n{ham}')
+        print(f'test_ham:\n{test_ham[0]}')
+
+        print(f'eval difference: {np.linalg.norm(evals - test_evals)}')
+        print(f'ham difference: {np.linalg.norm(ham - test_ham[0])}')
 
 
 def p4_1():
@@ -155,6 +182,8 @@ def p4_1_test():
     fig.legend(handles, labels, **LEGEND_OPTIONS)
     fig.savefig(FIGS_DIR + 'testing_p4_1_1.png')
 
+
 if __name__ == '__main__':
-    p4_1()
+    # p4_1()
     # p4_1_test()
+    p4_1_debug()
