@@ -10,7 +10,7 @@ FIGS_DIR = './figs/'
 LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
 FIG_SAVE_OPTIONS = {'bbox_inches': 'tight'}
 
-LSPACE = np.arange(8, 11)
+LSPACE = np.arange(8, 9)
 
 FIELD_VALS = {'hx': -1.05, 'hz': 0.5}
 
@@ -85,12 +85,13 @@ def p4_1():
         'y': np.array([[0, 1j], [-1j, 0]]),
         'z': np.array([[-1, 0], [0, 1]])
     }
-    fig, axes = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
+    fig_sig, axes_sig = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
+    fig_beta, axes_beta = plt.subplots(figsize=(5, 5))
     for L in LSPACE:
         eigs = dense_eigs(L, note=f'L{L}')
         evals = eigs['evals']
         evecs = eigs['evecs']
-        t_space = np.linspace(0, 10, 100)
+        t_space = np.linspace(0, 100, 100)
 
         xi_state = make_xi_state(L)
         # convert xi state to diagonal basis
@@ -99,9 +100,22 @@ def p4_1():
         # c_m^* c_n
         coeffs = np.multiply.outer(xi_state.conj(), xi_state)
 
+        # p4_1_2 stuff
+        beta_space = np.linspace(0, 5, 1000)
+        Z_beta = np.array([np.sum(np.exp(-beta * evals)) for beta in beta_space])
+        E_beta = np.array([np.sum(np.exp(-beta * evals) * evals) for beta in beta_space]) / Z_beta
+        xi_eng = np.sum(xi_state.conj() * evals * xi_state)
+        print(f'xi_eng: {xi_eng}')
+        xi_beta_idx = np.argmin(np.abs(E_beta - xi_eng))
+        xi_beta = beta_space[xi_beta_idx]
+        print(f'xi_beta: {xi_beta}')
+
         for op_idx, op in enumerate(ops):
             Omn = rebase_operator(L, ops[op], evecs)
             eng_diff = np.add.outer(-1 * evals, evals)
+
+            O_thermal = np.sum(np.diag(Omn) * np.exp(-1 * xi_beta * evals)) / Z_beta[xi_beta_idx]
+
             measurement = []
             # Need to loop over `t_space` in order to not run out of memory. Otherwise I would make a dim-3 array
             # for eng_diff to include time.
@@ -109,30 +123,21 @@ def p4_1():
                 propagator = np.exp(-1j * eng_diff * t)
                 measurement.append(np.sum(coeffs * propagator * Omn))
 
-            axes[op_idx].plot(t_space, measurement, label=f'L={L}')
-            axes[op_idx].set_xlabel('Time $t$')
-            axes[op_idx].set_title(rf'$\mu={op}$')
+            axes_sig[op_idx].plot(t_space, measurement, label=f'L={L}')
+            axes_sig[op_idx].axhline(O_thermal, label=rf'Thermal Value for $L={L}$')
+            axes_sig[op_idx].set_xlabel('Time $t$')
+            axes_sig[op_idx].set_title(rf'$\mu={op}$')
+        axes_beta.plot(beta_space, E_beta, label=rf'$L={L}$')
 
-    axes[0].set_ylabel(r'$\langle \sigma_1^\mu(t) \rangle$')
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, **LEGEND_OPTIONS)
-    fig.savefig(FIGS_DIR + 'p4_1_1.png', **FIG_SAVE_OPTIONS)
+    axes_sig[0].set_ylabel(r'$\langle \sigma_1^\mu(t) \rangle$')
+    handles, labels = axes_sig[0].get_legend_handles_labels()
+    fig_sig.legend(handles, labels, **LEGEND_OPTIONS)
+    fig_sig.savefig(FIGS_DIR + 'p4_1_1.png', **FIG_SAVE_OPTIONS)
 
-
-def p4_1_2():
-    fig, axes = plt.subplots(1, 1, figsize=(5, 5))
-    for L in LSPACE:
-        eigs = dense_eigs(L, note=f'L{L}')
-        evals = eigs['evals']
-        beta_space = np.linspace(0, 10, 1000)
-
-        Z_beta = np.array([np.sum(np.exp(-beta * evals)) for beta in beta_space])
-        E_beta = np.array([np.sum(np.exp(-beta * evals) * evals) for beta in beta_space]) / Z_beta
-        axes.plot(beta_space, E_beta, label=rf'$L={L}$')
-    axes.set_xlabel(r'$\beta$')
-    axes.set_ylabel(r'$E_\beta$')
-    fig.legend(**LEGEND_OPTIONS)
-    fig.savefig(FIGS_DIR + 'p4_1_2_E_beta.png', **FIG_SAVE_OPTIONS)
+    axes_beta.set_xlabel(r'$\beta$')
+    axes_beta.set_ylabel(r'$E_\beta$')
+    fig_beta.legend(**LEGEND_OPTIONS)
+    fig_beta.savefig(FIGS_DIR + 'p4_1_2_E_beta.png', **FIG_SAVE_OPTIONS)
 
 
 if __name__ == '__main__':
