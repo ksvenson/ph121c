@@ -93,9 +93,7 @@ def p4_1_debug():
         print(f'is ham diagonal? {np.linalg.norm(diagonal - diag_evals)}')
 
 
-
-
-def p4_1():
+def p4_1_1():
     # Pauli matrices defined in a basis where first component is spin down, second component is spin up.
     ops = {
         'x': np.array([[0, 1], [1, 0]]),
@@ -178,7 +176,22 @@ def p4_1_test():
     fig.savefig(FIGS_DIR + 'testing_p4_1_1.png')
 
 
+def p4_1_2():
+    fig, axes = plt.subplots(1, 1, figsize=(5, 5))
+    for L in LSPACE:
+        eigs = dense_eigs(L, note=f'L{L}')
+        evals = eigs['evals']
+        beta_space = np.linspace(0, 10, 1000)
+
+        Z_beta = np.array([np.sum(np.exp(-beta * evals)) for beta in beta_space])
+        E_beta = np.array([np.sum(np.exp(-beta * evals) * evals) for beta in beta_space]) / Z_beta
+        axes.plot(beta_space, E_beta, label=rf'$L={L}$')
+    axes.set_xlabel(r'$\beta$')
+    axes.set_ylabel(r'$E_\beta$')
+    fig.legend(**LEGEND_OPTIONS)
+    fig.savefig(FIGS_DIR + 'p4_1_2_E_beta.png', **FIG_SAVE_OPTIONS)
+
+
 if __name__ == '__main__':
-    p4_1()
-    p4_1_test()
-    # p4_1_debug()
+    # p4_1_1()
+    p4_1_2()
