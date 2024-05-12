@@ -6,13 +6,17 @@ from lab1 import main as l1main
 import utility
 
 CACHE_DIR = './data/'
+FIGS_DIR = './figs/'
 
-LSPACE = np.arange(8, 11)
+LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
+FIG_SAVE_OPTIONS = {'bbox_inches': 'tight'}
+
+LSPACE = np.arange(8, 9)
 
 FIELD_VALS = {'hx': -1.05, 'hz': 0.5}
 
 
-@utility.cache('npy', CACHE_DIR + 'dense_H')
+# @utility.cache('npy', CACHE_DIR + 'dense_H')
 def make_dense_H(L, note=None):
     """
     Makes Hamiltonian in sigma_z basis as defined in Equation 8 with periodic boundary conditions.
@@ -35,7 +39,7 @@ def make_dense_H(L, note=None):
     return H
 
 
-@utility.cache('npz', CACHE_DIR + 'l3_dense_eigs')
+# @utility.cache('npz', CACHE_DIR + 'l3_dense_eigs')
 def dense_eigs(L, note=None):
     """
     Diagonalizes Hamiltonian from `make_dense_H`.
@@ -75,29 +79,82 @@ def rebase_operator(L, op, evecs):
 
 
 def p4_1():
+    # Pauli matrices defined in a basis where first component is spin down, second component is spin up.
+    ops = {
+        'x': np.array([[0, 1], [1, 0]]),
+        'y': np.array([[0, 1j], [-1j, 0]]),
+        'z': np.array([[-1, 0], [0, 1]])
+    }
+    fig, axes = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
     for L in LSPACE:
         eigs = dense_eigs(L, note=f'L{L}')
         evals = eigs['evals']
         evecs = eigs['evecs']
-        t_space = np.linspace(0, 10, 1000)
+        t_space = np.linspace(0, 10, 100)
         xi_state = make_xi_state(L)
         # convert xi state to diagonal basis
         xi_state = evecs.T.conj() @ xi_state
+        # c_m^* c_n
+        coeffs = np.multiply.outer(xi_state.conj(), xi_state)
+        # (e_n - e_m) t
+        eng_diff = np.add.outer(-1 * evals, evals)
+        propagator = np.exp(-1j * np.multiply.outer(t_space, eng_diff))
+        for op_idx, op in enumerate(ops):
+            og_xi_state = make_xi_state(L)
+            global_op = np.kron(ops[op], np.identity(2**(L-1)))
+            print(f'{op}0: {np.sum(og_xi_state.conj() * (global_op @ og_xi_state))}')
 
-        ops = {
-            'sx': np.array([[0, 1], [1, 0]]),
-            'sy': np.array([[0, -1j], [1j, 0]]),
-            'sz': np.array([[1, 0], [0, -1]])
-        }
+            Omn = rebase_operator(L, ops[op], evecs)
+            # Omn = rebase_operator(L, np.identity(2), evecs)
 
-        # use .outer to do stuff
+            # Omn = evecs.T.conj() @ np.identity(2**L) @ evecs
 
-        propagator = np.exp(-1j * np.outer(t_space, evals))
-        # states are in rows, each row is propagated a different time
-        evolved = propagator * xi_state
+            # Omn = np.diag(-2 * (np.arange(2**L) // 2**(L-1)) + 1)
+            # Omn = evecs.T.conj() @ np.diag(-2 * (np.arange(2**L) % 2) + 1) @ evecs
 
+            O_evolution = np.sum(coeffs * propagator * Omn, axis=(1, 2))
 
+            axes[op_idx].plot(t_space, O_evolution, label=f'L={L}')
+            axes[op_idx].set_xlabel('Time $t$')
+            axes[op_idx].set_title(rf'$\mu={op}$')
 
+    axes[0].set_ylabel(r'$\langle \sigma_1^\mu(t) \rangle$')
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, **LEGEND_OPTIONS)
+    fig.savefig(FIGS_DIR + 'p4_1_1.png')
+
+def p4_1_test():
+    # Pauli matrices defined in a basis where first component is spin down, second component is spin up.
+    ops = {
+        'x': np.array([[0, 1], [1, 0]]),
+        'y': np.array([[0, 1j], [-1j, 0]]),
+        'z': np.array([[-1, 0], [0, 1]])
+    }
+    fig, axes = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
+    for L in LSPACE:
+        eigs = dense_eigs(L, note=f'L{L}')
+        evals = eigs['evals']
+        evecs = eigs['evecs']
+        t_space = np.linspace(0, 10, 100)
+        xi_state = make_xi_state(L)
+        # convert xi state to diagonal basis
+        xi_state = evecs.T.conj() @ xi_state
+        for op_idx, op in enumerate(ops):
+            data = []
+            Omn = rebase_operator(L, ops[op], evecs)
+            for t in t_space:
+                evolved = np.exp(-1j * evals * t) * xi_state
+                data.append(np.sum(evolved.conj() * (Omn @ evolved)))
+
+            axes[op_idx].plot(t_space, data, label=f'L={L}')
+            axes[op_idx].set_xlabel('Time $t$ testing')
+            axes[op_idx].set_title(rf'$\mu={op}$')
+
+    axes[0].set_ylabel(r'$\langle \sigma_1^\mu(t) \rangle$')
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, **LEGEND_OPTIONS)
+    fig.savefig(FIGS_DIR + 'testing_p4_1_1.png')
 
 if __name__ == '__main__':
     p4_1()
+    # p4_1_test()
