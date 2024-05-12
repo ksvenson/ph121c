@@ -11,9 +11,9 @@ FIGS_DIR = './figs/'
 LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
 FIG_SAVE_OPTIONS = {'bbox_inches': 'tight'}
 
-LSPACE = np.arange(2, 3)
+LSPACE = np.arange(1, 2)
 
-FIELD_VALS = {'hx': 1, 'hz': 0}
+FIELD_VALS = {'hx': -1.05, 'hz': 0.5}
 
 
 # @utility.cache('npy', CACHE_DIR + 'dense_H')
@@ -78,7 +78,7 @@ def rebase_operator(L, op, evecs):
     """
     global_op = np.identity(2**(L-1))
     global_op = np.kron(op, global_op)
-    return evecs.T.conj() @ global_op @ evecs
+    return evecs.T.conj() @ global_op @ evecs, global_op
 
 
 def p4_1_debug():
@@ -86,23 +86,13 @@ def p4_1_debug():
         ham = make_dense_H(L)
         eigs = dense_eigs(L, note=f'L{L}')
         evals = eigs['evals']
+        evecs = eigs['evecs']
 
-        # test_ham = np.load(f'../lab2/data/dense_H_L{L}.npz')['loop'][0]
-        # test_eigs = np.load(f'../lab2/data/dense_eigs_loop_L{L}.npz')
-        # test_evals = test_eigs['evals'][0]
+        diagonal = evecs.T.conj() @ ham @ evecs
+        diag_evals = np.diag(evals)
+        print(f'is ham diagonal? {np.linalg.norm(diagonal - diag_evals)}')
 
-        test_ham = l1main.make_dense_H(L, hspace=[FIELD_VALS['hx']], note=f'DELETE_ME_L{L}_hx{FIELD_VALS["hx"]}')['loop']
-        test_eigs = l1main.dense_eigs(test_ham, hspace=[FIELD_VALS['hx']], note=f'DELETE_ME_L{L}_hx{FIELD_VALS["hx"]}')
-        test_evals = test_eigs['evals'][0]
 
-        evals = np.sort(evals)
-        test_evals = np.sort(test_evals)
-
-        print(f'ham:\n{ham}')
-        print(f'test_ham:\n{test_ham[0]}')
-
-        print(f'eval difference: {np.linalg.norm(evals - test_evals)}')
-        print(f'ham difference: {np.linalg.norm(ham - test_ham[0])}')
 
 
 def p4_1():
@@ -127,17 +117,21 @@ def p4_1():
         eng_diff = np.add.outer(-1 * evals, evals)
         propagator = np.exp(-1j * np.multiply.outer(t_space, eng_diff))
         for op_idx, op in enumerate(ops):
-            og_xi_state = make_xi_state(L)
-            global_op = np.kron(ops[op], np.identity(2**(L-1)))
-            print(f'{op}0: {np.sum(og_xi_state.conj() * (global_op @ og_xi_state))}')
+            print(ops[op])
+            Omn, og_basis = rebase_operator(L, ops[op], evecs)
 
-            Omn = rebase_operator(L, ops[op], evecs)
-            # Omn = rebase_operator(L, np.identity(2), evecs)
+            test_H = np.zeros((2**L, 2**L))
+            for i in range(2**L):
+                test_H[i ^ (1 << (L-1)), i] = 1
+            print(f'test_H:\n{test_H}')
+            print(f'og basis:\n{og_basis}')
 
-            # Omn = evecs.T.conj() @ np.identity(2**L) @ evecs
 
-            # Omn = np.diag(-2 * (np.arange(2**L) // 2**(L-1)) + 1)
-            # Omn = evecs.T.conj() @ np.diag(-2 * (np.arange(2**L) % 2) + 1) @ evecs
+            test_H = evecs.T.conj() @ test_H @ evecs
+            print(f'test_H diff: {np.linalg.norm(test_H - Omn)}')
+
+
+            # Omn = np.diag(evals)
 
             O_evolution = np.sum(coeffs * propagator * Omn, axis=(1, 2))
 
@@ -149,6 +143,7 @@ def p4_1():
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, **LEGEND_OPTIONS)
     fig.savefig(FIGS_DIR + 'p4_1_1.png')
+
 
 def p4_1_test():
     # Pauli matrices defined in a basis where first component is spin down, second component is spin up.
@@ -162,7 +157,7 @@ def p4_1_test():
         eigs = dense_eigs(L, note=f'L{L}')
         evals = eigs['evals']
         evecs = eigs['evecs']
-        t_space = np.linspace(0, 10, 100)
+        t_space = np.linspace(0, 100, 100)
         xi_state = make_xi_state(L)
         # convert xi state to diagonal basis
         xi_state = evecs.T.conj() @ xi_state
@@ -184,6 +179,6 @@ def p4_1_test():
 
 
 if __name__ == '__main__':
-    # p4_1()
-    # p4_1_test()
-    p4_1_debug()
+    p4_1()
+    p4_1_test()
+    # p4_1_debug()
