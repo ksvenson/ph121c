@@ -54,7 +54,7 @@ def dense_eigs(L, note=None):
 
 def make_xi_state(L):
     """
-    Makes xi state as defined in equation 9.
+    Makes xi state as defined in Equation 9.
     :param L: system size.
     :return: xi state in sigma z basis.
     """
@@ -67,7 +67,8 @@ def make_xi_state(L):
 
 def rebase_operator(L, op, evecs):
     """
-    Convert the basis of a local 2x2 operator at site 1 from sigma z to the energy basis.
+    First, take local 2x2 operator `op` and turn it into a global 2**L x 2**L operator in sigma z basis.
+    Then, change basis of global operator to energy basis using `evecs`.
     :param L: system size.
     :param op: 2x2 local operator.
     :return: 2**L x 2**L operator in energy basis
@@ -102,7 +103,7 @@ def p4_1():
             Omn = rebase_operator(L, ops[op], evecs)
             eng_diff = np.add.outer(-1 * evals, evals)
             measurement = []
-            # Need to loop here in order to not run out of memory. Otherwise I would make a dim-3 array
+            # Need to loop over `t_space` in order to not run out of memory. Otherwise I would make a dim-3 array
             # for eng_diff to include time.
             for t in t_space:
                 propagator = np.exp(-1j * eng_diff * t)
