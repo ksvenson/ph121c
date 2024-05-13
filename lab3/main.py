@@ -2,6 +2,7 @@ import numpy as np
 import scipy as sp
 import matplotlib.pyplot as plt
 
+from lab1 import main as l2main
 import utility
 
 CACHE_DIR = './data/'
@@ -11,6 +12,7 @@ LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
 FIG_SAVE_OPTIONS = {'bbox_inches': 'tight'}
 
 LSPACE = np.arange(8, 9)
+TSPACE = np.linspace(0, 10, 100)
 
 FIELD_VALS = {'hx': -1.05, 'hz': 0.5}
 
@@ -52,17 +54,20 @@ def dense_eigs(L, note=None):
     return {'evals': evals, 'evecs': evecs}
 
 
-def make_xi_state(L):
+def make_prod_state(L, up_coeff, down_coeff):
     """
-    Makes xi state as defined in Equation 9.
+    Make a translation-invariant product state in the sigma z basis.
     :param L: system size.
-    :return: xi state in sigma z basis.
+    :param up_coeff: spin up coefficient.
+    :param down_coeff: spin down coefficient.
+    :return: length 2**L array representing the state.
     """
-    xi_state = []
+    output = []
     for state in range(2**L):
-        num_down = L - state.bit_count()
-        xi_state.append((-1*np.sqrt(3))**num_down)
-    return np.array(xi_state) / 2**L
+        num_up = state.bit_count()
+        num_down = L - num_up
+        output.append((up_coeff**num_up) * (down_coeff**num_down))
+    return output
 
 
 def rebase_operator(L, op, evecs):
@@ -87,13 +92,12 @@ def p4_1():
     }
     fig_sig, axes_sig = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
     fig_beta, axes_beta = plt.subplots(figsize=(5, 5))
-    for L in LSPACE:
+    for color_idx, L in enumerate(LSPACE):
         eigs = dense_eigs(L, note=f'L{L}')
         evals = eigs['evals']
         evecs = eigs['evecs']
-        t_space = np.linspace(0, 100, 100)
 
-        xi_state = make_xi_state(L)
+        xi_state = make_prod_state(L, 1/2, -np.sqrt(3))
         # convert xi state to diagonal basis
         xi_state = evecs.T.conj() @ xi_state
 
@@ -101,14 +105,12 @@ def p4_1():
         coeffs = np.multiply.outer(xi_state.conj(), xi_state)
 
         # p4_1_2 stuff
-        beta_space = np.linspace(0, 5, 1000)
+        beta_space = np.linspace(-3, 3, 10000)
         Z_beta = np.array([np.sum(np.exp(-beta * evals)) for beta in beta_space])
         E_beta = np.array([np.sum(np.exp(-beta * evals) * evals) for beta in beta_space]) / Z_beta
         xi_eng = np.sum(xi_state.conj() * evals * xi_state)
-        print(f'xi_eng: {xi_eng}')
         xi_beta_idx = np.argmin(np.abs(E_beta - xi_eng))
         xi_beta = beta_space[xi_beta_idx]
-        print(f'xi_beta: {xi_beta}')
 
         for op_idx, op in enumerate(ops):
             Omn = rebase_operator(L, ops[op], evecs)
@@ -119,12 +121,12 @@ def p4_1():
             measurement = []
             # Need to loop over `t_space` in order to not run out of memory. Otherwise I would make a dim-3 array
             # for eng_diff to include time.
-            for t in t_space:
+            for t in TSPACE:
                 propagator = np.exp(-1j * eng_diff * t)
                 measurement.append(np.sum(coeffs * propagator * Omn))
 
-            axes_sig[op_idx].plot(t_space, measurement, label=f'L={L}')
-            axes_sig[op_idx].axhline(O_thermal, label=rf'Thermal Value for $L={L}$')
+            axes_sig[op_idx].plot(TSPACE, measurement, label=f'L={L}', color=f'C{color_idx}')
+            axes_sig[op_idx].axhline(O_thermal, label=rf'$L={L}$ Thermal Limit', color=f'C{color_idx}', linestyle='dotted')
             axes_sig[op_idx].set_xlabel('Time $t$')
             axes_sig[op_idx].set_title(rf'$\mu={op}$')
         axes_beta.plot(beta_space, E_beta, label=rf'$L={L}$')
@@ -138,6 +140,16 @@ def p4_1():
     axes_beta.set_ylabel(r'$E_\beta$')
     fig_beta.legend(**LEGEND_OPTIONS)
     fig_beta.savefig(FIGS_DIR + 'p4_1_2_E_beta.png', **FIG_SAVE_OPTIONS)
+
+
+def p4_1_3():
+    for L in LSPACE:
+        eigs = dense_eigs(L, note=f'L{L}')
+        evals = eigs['evals']
+        evecs = eigs['evecs']
+
+        xi_state = make_xi_state(L)
+
 
 
 if __name__ == '__main__':
