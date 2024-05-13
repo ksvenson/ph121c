@@ -2,7 +2,7 @@ import numpy as np
 import scipy as sp
 import matplotlib.pyplot as plt
 
-from lab1 import main as l2main
+from lab2 import main as l2main
 import utility
 
 CACHE_DIR = './data/'
@@ -11,8 +11,8 @@ FIGS_DIR = './figs/'
 LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
 FIG_SAVE_OPTIONS = {'bbox_inches': 'tight'}
 
-LSPACE = np.arange(8, 9)
-TSPACE = np.linspace(0, 10, 100)
+LSPACE = np.arange(8, 11)
+TSPACE = np.linspace(0, 1e2, 100000)
 
 FIELD_VALS = {'hx': -1.05, 'hz': 0.5}
 
@@ -97,7 +97,7 @@ def p4_1():
         evals = eigs['evals']
         evecs = eigs['evecs']
 
-        xi_state = make_prod_state(L, 1/2, -np.sqrt(3))
+        xi_state = make_prod_state(L, 1/2, -np.sqrt(3)/2)
         # convert xi state to diagonal basis
         xi_state = evecs.T.conj() @ xi_state
 
@@ -125,7 +125,7 @@ def p4_1():
                 propagator = np.exp(-1j * eng_diff * t)
                 measurement.append(np.sum(coeffs * propagator * Omn))
 
-            axes_sig[op_idx].plot(TSPACE, measurement, label=f'L={L}', color=f'C{color_idx}')
+            axes_sig[op_idx].plot(TSPACE, measurement, label=f'$L={L}$', color=f'C{color_idx}')
             axes_sig[op_idx].axhline(O_thermal, label=rf'$L={L}$ Thermal Limit', color=f'C{color_idx}', linestyle='dotted')
             axes_sig[op_idx].set_xlabel('Time $t$')
             axes_sig[op_idx].set_title(rf'$\mu={op}$')
@@ -143,14 +143,41 @@ def p4_1():
 
 
 def p4_1_3():
+    fig, axes = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(10, 5))
     for L in LSPACE:
         eigs = dense_eigs(L, note=f'L{L}')
         evals = eigs['evals']
         evecs = eigs['evecs']
 
-        xi_state = make_xi_state(L)
+        xi_state = make_prod_state(L, 1/2, -np.sqrt(3)/2)
+        xi_state = evecs.T.conj() @ xi_state
 
+        my_state = make_prod_state(L, -1/np.sqrt(2), 1/np.sqrt(2))
+        my_state = evecs.T.conj() @ my_state
+
+        propagator = np.exp(-1j * np.multiply.outer(TSPACE, evals))
+
+        states = {'xi': xi_state, 'my': my_state}
+        ax_idx = 0
+        for tag, state in states.items():
+            evolved_states = propagator * state
+            # convert states back to sigma z basis:
+            evolved_states = (evecs @ evolved_states.T).T
+            entropy = l2main.get_entropy(evolved_states, L//2, note=f'{tag}_entropy_trace_L{L}')
+
+            axes[ax_idx].plot(TSPACE, entropy, label=rf'$L={L}$')
+            axes[ax_idx].set_xlabel(r'Time $t$')
+            ax_idx += 1
+
+    axes[0].set_title(r'$\otimes \frac{1}{2}(|\uparrow\rangle - \sqrt{3}|\downarrow\rangle)$')
+    axes[1].set_title(r'$\otimes \frac{1}{\sqrt{2}}(-|\uparrow\rangle + |\downarrow\rangle)$')
+
+    axes[0].set_ylabel(r'$S_{L/2}(t)$')
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, **LEGEND_OPTIONS)
+    fig.savefig(FIGS_DIR + 'p4_1_3.png', **FIG_SAVE_OPTIONS)
 
 
 if __name__ == '__main__':
-    p4_1()
+    # p4_1()
+    p4_1_3()
