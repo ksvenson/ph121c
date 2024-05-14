@@ -13,6 +13,7 @@ FIG_SAVE_OPTIONS = {'bbox_inches': 'tight'}
 
 LSPACE = np.arange(8, 15, 2)
 TSPACE = np.linspace(0, 10, 100)
+beta_space = np.linspace(-3, 3, 10000)
 
 FIELD_VALS = {'hx': -1.05, 'hz': 0.5}
 
@@ -47,11 +48,26 @@ def make_dense_H(L, note=None):
     return H
 
 
-@utility.cache('npy', CACHE_DIR + 'dense_H')
+@utility.cache('npy', CACHE_DIR + 'dense_H_rand')
 def make_dense_H_rand(L, W=3, note=None):
     np.random.seed(271)
     hx = np.random.uniform(-W, W, L)
-
+    hz = np.random.uniform(-W, W, L)
+    H = np.zeros((2**L, 2**L))
+    for i in range(2**L):
+        # Perform a XOR between states, and states shifted by 1 bit. Make sure that last bit is set to zero.
+        H[i, i] += 2 * ((i & ~(1 << L-1)) ^ (i >> 1)).bit_count() - (L-1)
+        # Include the periodic term.
+        H[i, i] += 2 * ((i ^ (i >> (L - 1))) % 2) - 1
+        # h_z field
+        sigma_z = 2 * np.array([int(bit) for bit in bin(i)[2:]]) - 1
+        H[i, i] += -1 * np.sum(hz * sigma_z)
+        # h_x field
+        flips = np.arange(L)
+        # Need to reverse hx here since `flips` flips the spins in reverse order.
+        # Although, it doesn't really matter since hx is random anyway.
+        H[i ^ (1 << flips), i] += -1 * hx[::-1]
+    return H
 
 
 @utility.cache('npz', CACHE_DIR + 'l3_dense_eigs')
@@ -133,7 +149,6 @@ def p4_1_12():
         evolved_states = (propagator * xi_state).T
 
         # p4_1_2 calculations
-        beta_space = np.linspace(-3, 3, 10000)
         Z_beta = np.array([np.sum(np.exp(-beta * evals)) for beta in beta_space])
         E_beta = np.array([np.sum(np.exp(-beta * evals) * evals) for beta in beta_space]) / Z_beta
         xi_eng = np.sum(xi_state.conj() * evals * xi_state)
@@ -204,6 +219,7 @@ def p4_2_12():
     fig_expval, axes_expval = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
     fig_entropy, axes_entropy = plt.subplots(figsize=(10, 5))
     for L in LSPACE:
+        print(f'L={L}')
         eigs = dense_eigs(L, note=f'L{L}')
         evals = eigs['evals']
         evecs = eigs['evecs']
@@ -216,6 +232,7 @@ def p4_2_12():
         k0_evecs = evecs[:, k0_sector]
 
         for op_idx, op in enumerate(ops):
+            print(f'op: {op}')
             global_op = globalize_op(L, ops[op])
             sigma_expvals = np.sum(k0_evecs.conj() * (global_op @ k0_evecs), axis=0)
 
@@ -244,10 +261,10 @@ def p4_3_1():
 
 
 if __name__ == '__main__':
-    p4_1_12()
+    # p4_1_12()
 
     # p4_1_3()
-    #
-    # p4_2_12()
+
+    p4_2_12()
 
 
