@@ -26,14 +26,7 @@ ops = {
 
 
 @utility.cache('npy', CACHE_DIR + 'dense_H')
-def make_dense_H(L, note=None):
-    """
-    Makes Hamiltonian in sigma_z basis as defined in Equation 8 with periodic boundary conditions.
-    States are indexed in binary: 0 for spin down and 1 for spin up.
-    :param L: system size.
-    :param note: appeneded to filename when caching function output.
-    :return: Hamiltonian with shape (2**L, 2**L).
-    """
+def make_dense_H_old(L, note=None):
     H = np.zeros((2**L, 2**L))
     for i in range(2**L):
         # Perform a XOR between states, and states shifted by 1 bit. Make sure that last bit is set to zero.
@@ -49,29 +42,44 @@ def make_dense_H(L, note=None):
 
 
 @utility.cache('npy', CACHE_DIR + 'dense_H_rand')
-def make_dense_H_rand(L, W=3, note=None):
-    np.random.seed(271)
-    hx = np.random.uniform(-W, W, L)
-    hz = np.random.uniform(-W, W, L)
+def make_dense_H(L, W=None, note=None):
+    """
+    Makes Hamiltonian in sigma_z basis as defined in Equation 8 and 11 with periodic boundary conditions.
+    States are indexed in binary: 0 for spin down and 1 for spin up.
+    :param L: system size.
+    :param W: uniform distribution parameter.
+    :param note: appeneded to filename when caching function output.
+    :return: Hamiltonian with shape (2**L, 2**L).
+    """
     H = np.zeros((2**L, 2**L))
     for i in range(2**L):
         # Perform a XOR between states, and states shifted by 1 bit. Make sure that last bit is set to zero.
         H[i, i] += 2 * ((i & ~(1 << L-1)) ^ (i >> 1)).bit_count() - (L-1)
         # Include the periodic term.
         H[i, i] += 2 * ((i ^ (i >> (L - 1))) % 2) - 1
-        # h_z field
-        sigma_z = 2 * np.array([int(bit) for bit in bin(i)[2:]]) - 1
-        H[i, i] += -1 * np.sum(hz * sigma_z)
-        # h_x field
         flips = np.arange(L)
-        # Need to reverse hx here since `flips` flips the spins in reverse order.
-        # Although, it doesn't really matter since hx is random anyway.
-        H[i ^ (1 << flips), i] += -1 * hx[::-1]
+        if W is None:
+            # h_z field
+            H[i, i] += -1 * FIELD_VALS['hz'] * (2 * i.bit_count() - L)
+
+            # h_x field
+            H[i ^ (1 << flips), i] += -1 * FIELD_VALS['hx']
+        else:
+            np.random.seed(271)
+            hx = np.random.uniform(-W, W, L)
+            hz = np.random.uniform(-W, W, L)
+
+            # h_z field
+            sigma_z = 2 * np.array([int(bit) for bit in bin(i)[2:]]) - 1
+            H[i, i] += -1 * np.sum(hz * sigma_z)
+
+            # h_x field
+            H[i ^ (1 << flips), i] += -1 * hx
     return H
 
 
 @utility.cache('npz', CACHE_DIR + 'l3_dense_eigs')
-def dense_eigs(L, note=None):
+def dense_eigs(L, W=None, note=None):
     """
     Diagonalizes Hamiltonian from `make_dense_H`.
     :param L: system size.
@@ -79,7 +87,7 @@ def dense_eigs(L, note=None):
     :return: as a dict: list of evals, matrix with evecs as columns
     """
     print(f'finding dense evals: L={L}')
-    H = make_dense_H(L, note=note)
+    H = make_dense_H(L, W=W, note=note)
     evals, evecs = sp.linalg.eigh(H)
     return {'evals': evals, 'evecs': evecs}
 
@@ -130,12 +138,13 @@ def make_trans_op(L):
     return T
 
 
-def p4_1_12():
-    fig_sig, axes_sig = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
-    fig_beta, axes_beta = plt.subplots(figsize=(5, 5))
+def ham_analysis(plot_sig, plot_beta, plot_entropy, W=None, note=None):
+    fig_sig, axes_sig = plot_sig
+    fig_beta, axes_beta = plot_beta
+    fig_entropy, axes_entropy = plot_entropy
     for color_idx, L in enumerate(LSPACE):
         print(f'L={L}')
-        eigs = dense_eigs(L, note=f'L{L}')
+        eigs = dense_eigs(L, W=W, note=note)
         evals = eigs['evals']
         evecs = eigs['evecs']
 
@@ -148,7 +157,6 @@ def p4_1_12():
         # evolving the expectation value, like in Equation 3.
         evolved_states = (propagator * xi_state).T
 
-        # p4_1_2 calculations
         Z_beta = np.array([np.sum(np.exp(-beta * evals)) for beta in beta_space])
         E_beta = np.array([np.sum(np.exp(-beta * evals) * evals) for beta in beta_space]) / Z_beta
         xi_eng = np.sum(xi_state.conj() * evals * xi_state)
@@ -177,6 +185,11 @@ def p4_1_12():
     axes_beta.set_ylabel(r'$E_\beta$')
     fig_beta.legend(**LEGEND_OPTIONS)
     fig_beta.savefig(FIGS_DIR + 'p4_1_2_E_beta.png', **FIG_SAVE_OPTIONS)
+
+
+def p4_1_12():
+    fig_sig, axes_sig = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
+    fig_beta, axes_beta = plt.subplots(figsize=(5, 5))
 
 
 def p4_1_3():
