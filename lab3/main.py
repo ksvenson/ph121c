@@ -16,6 +16,13 @@ TSPACE = np.linspace(0, 10, 100)
 
 FIELD_VALS = {'hx': -1.05, 'hz': 0.5}
 
+# Pauli matrices defined in a basis where first component is spin down, second component is spin up.
+ops = {
+    'x': np.array([[0, 1], [1, 0]]),
+    'y': np.array([[0, 1j], [-1j, 0]]),
+    'z': np.array([[-1, 0], [0, 1]])
+}
+
 
 @utility.cache('npy', CACHE_DIR + 'dense_H')
 def make_dense_H(L, note=None):
@@ -70,29 +77,41 @@ def make_prod_state(L, up_coeff, down_coeff):
     return output
 
 
+def globalize_op(L, op):
+    """
+    Take local 2x2 operator `op` and turn it into a global 2**L x 2**L operator in sigma z basis.
+    :param L: system size.
+    :param op: 2x2 local operator at site 1.
+    :return: 2**L x 2**L operator in sigma z basis.
+    """
+    return np.kron(op, np.identity(2**(L-1)))
+
+
 def rebase_operator(L, op, evecs):
     """
     First, take local 2x2 operator `op` and turn it into a global 2**L x 2**L operator in sigma z basis.
     Then, change basis of global operator to energy basis using `evecs`.
     :param L: system size.
-    :param op: 2x2 local operator.
-    :return: 2**L x 2**L operator in energy basis
+    :param op: 2x2 local operator at site 1.
+    :return: 2**L x 2**L operator in energy basis.
     """
-    global_op = np.identity(2**(L-1))
-    global_op = np.kron(op, global_op)
-    return evecs.T.conj() @ global_op @ evecs
+    return evecs.T.conj() @ globalize_op(L, op) @ evecs
+
+
+def make_trans_op(L):
+    T = np.zeros((2**L, 2**L))
+    for state in range(2**L):
+        last_bit = state & 1
+        cycle = (state >> 1) | (last_bit << (L-1))
+        T[cycle, state] = 1
+    return T
 
 
 def p4_1_12():
-    # Pauli matrices defined in a basis where first component is spin down, second component is spin up.
-    ops = {
-        'x': np.array([[0, 1], [1, 0]]),
-        'y': np.array([[0, 1j], [-1j, 0]]),
-        'z': np.array([[-1, 0], [0, 1]])
-    }
     fig_sig, axes_sig = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
     fig_beta, axes_beta = plt.subplots(figsize=(5, 5))
     for color_idx, L in enumerate(LSPACE):
+        print(f'L={L}')
         eigs = dense_eigs(L, note=f'L{L}')
         evals = eigs['evals']
         evecs = eigs['evecs']
@@ -113,8 +132,11 @@ def p4_1_12():
         xi_beta = beta_space[xi_beta_idx]
 
         for op_idx, op in enumerate(ops):
+            print(f'op: {op}')
             Omn = rebase_operator(L, ops[op], evecs)
             eng_diff = np.add.outer(-1 * evals, evals)
+            # compute this product outside of the TSPACE loop to improve runtime
+            coeffs_Omn = coeffs * Omn
 
             O_thermal = np.sum(np.diag(Omn) * np.exp(-1 * xi_beta * evals)) / Z_beta[xi_beta_idx]
 
@@ -123,7 +145,7 @@ def p4_1_12():
             # for eng_diff to include time.
             for t in TSPACE:
                 propagator = np.exp(-1j * eng_diff * t)
-                measurement.append(np.sum(coeffs * propagator * Omn))
+                measurement.append(np.sum(coeffs_Omn * propagator))
 
             axes_sig[op_idx].plot(TSPACE, measurement, label=f'$L={L}$', color=f'C{color_idx}')
             axes_sig[op_idx].axhline(O_thermal, label=rf'$L={L}$ Thermal Limit', color=f'C{color_idx}', linestyle='dotted')
@@ -163,7 +185,7 @@ def p4_1_3():
             evolved_states = propagator * state
             # convert states back to sigma z basis:
             evolved_states = (evecs @ evolved_states.T).T
-            entropy = l2main.get_entropy(evolved_states, L//2, note=f'{tag}_entropy_trace_L{L}')
+            entropy = l2main.get_entropy(evolved_states, L//2, note=f'p4_1_3_L{L}_{tag}_entropy_trace')
 
             axes[ax_idx].plot(TSPACE, entropy, label=rf'$L={L}$')
             axes[ax_idx].set_xlabel(r'Time $t$')
@@ -176,6 +198,46 @@ def p4_1_3():
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, **LEGEND_OPTIONS)
     fig.savefig(FIGS_DIR + 'p4_1_3.png', **FIG_SAVE_OPTIONS)
+
+
+def p4_2_12():
+    fig_expval, axes_expval = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
+    fig_entropy, axes_entropy = plt.subplots(figsize=(15, 5))
+    for L in LSPACE:
+        eigs = dense_eigs(L, note=f'L{L}')
+        evals = eigs['evals']
+        evecs = eigs['evecs']
+
+        T = make_trans_op(L)
+        T_expvals = np.sum(evecs.conj() * (T @ evecs), axis=0)
+        k0_sector = np.abs(T_expvals - 1) <= 1e-5
+
+        k0_evals = evals[k0_sector]
+        k0_evecs = evecs[:, k0_sector]
+
+        for op_idx, op in ops:
+            global_op = globalize_op(L, ops[op])
+            sigma_expvals = np.sum(k0_evecs.conj() * (global_op @ k0_evecs), axis=0)
+
+            axes_expval[op_idx].plot(k0_evals/L, sigma_expvals, label=rf'$L={L}$')
+            axes_expval[op_idx].set_xlabel(r'$\varepsilon_n / L$')
+            axes_expval[op_idx].set_title(rf'$\mu={op}$')
+
+        entropy = l2main.get_entropy(k0_evecs.T, L//2, note=f'p4_2_2_entropy_L{L}_op{op}')
+
+        axes_entropy.plot(k0_evals / L, entropy/L, label=rf'$L={L}$')
+        axes_entropy.set_xlabel(r'$\varepsilon_n / L$')
+
+    axes_expval[0].set_ylabel(r'$\langle \sigma_1^\mu \rangle_n$')
+    handles, labels = axes_expval[0].get_legend_handles_labels()
+    fig_expval.legend(handles, labels, **LEGEND_OPTIONS)
+    fig_expval.savefig(FIGS_DIR + 'p4_2_1.png', **FIG_SAVE_OPTIONS)
+
+    axes_entropy.set_ylabel(r'$S_{L/2} / L$')
+    handles, labels = axes_entropy.get_legend_handles_labels()
+    fig_entropy.legend(handles, labels, **LEGEND_OPTIONS)
+    fig_entropy.savefig(FIGS_DIR + 'p4_2_2.png', **FIG_SAVE_OPTIONS)
+
 
 
 if __name__ == '__main__':
