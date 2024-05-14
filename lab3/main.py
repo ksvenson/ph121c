@@ -11,8 +11,8 @@ FIGS_DIR = './figs/'
 LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
 FIG_SAVE_OPTIONS = {'bbox_inches': 'tight'}
 
-LSPACE = np.arange(8, 11)
-TSPACE = np.linspace(0, 1e2, 100000)
+LSPACE = np.arange(8, 15, 2)
+TSPACE = np.linspace(0, 10, 100)
 
 FIELD_VALS = {'hx': -1.05, 'hz': 0.5}
 
@@ -83,7 +83,7 @@ def rebase_operator(L, op, evecs):
     return evecs.T.conj() @ global_op @ evecs
 
 
-def p4_1():
+def p4_1_12():
     # Pauli matrices defined in a basis where first component is spin down, second component is spin up.
     ops = {
         'x': np.array([[0, 1], [1, 0]]),
@@ -179,5 +179,8 @@ def p4_1_3():
 
 
 if __name__ == '__main__':
-    # p4_1()
-    p4_1_3()
+    p4_1_12()
+
+    # p4_1_3()
+
+
