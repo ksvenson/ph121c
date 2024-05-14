@@ -48,8 +48,10 @@ def make_dense_H(L, note=None):
 
 
 @utility.cache('npy', CACHE_DIR + 'dense_H')
-def make_dense_H_rand(L, note=None):
-    pass
+def make_dense_H_rand(L, W=3, note=None):
+    np.random.seed(271)
+    hx = np.random.uniform(-W, W, L)
+
 
 
 @utility.cache('npz', CACHE_DIR + 'l3_dense_eigs')
@@ -125,8 +127,10 @@ def p4_1_12():
         # convert xi state to diagonal basis
         xi_state = evecs.T.conj() @ xi_state
 
-        # c_m^* c_n
-        coeffs = np.multiply.outer(xi_state.conj(), xi_state)
+        propagator = np.exp(-1j * np.multiply.outer(TSPACE, evals))
+        # This method directly evolves the state like in Equation 2, which I found to be faster than
+        # evolving the expectation value, like in Equation 3.
+        evolved_states = (propagator * xi_state).T
 
         # p4_1_2 calculations
         beta_space = np.linspace(-3, 3, 10000)
@@ -138,19 +142,10 @@ def p4_1_12():
 
         for op_idx, op in enumerate(ops):
             print(f'op: {op}')
-            Omn = rebase_operator(L, ops[op], evecs)
-            eng_diff = np.add.outer(-1 * evals, evals)
-            # compute this product outside of the TSPACE loop to improve runtime
-            coeffs_Omn = coeffs * Omn
+            global_op = rebase_operator(L, ops[op], evecs)
+            measurement = np.sum(evolved_states.conj() * (global_op @ evolved_states), axis=0)
 
-            O_thermal = np.sum(np.diag(Omn) * np.exp(-1 * xi_beta * evals)) / Z_beta[xi_beta_idx]
-
-            measurement = []
-            # Need to loop over `t_space` in order to not run out of memory. Otherwise I would make a dim-3 array
-            # for eng_diff to include time.
-            for t in TSPACE:
-                propagator = np.exp(-1j * eng_diff * t)
-                measurement.append(np.sum(coeffs_Omn * propagator))
+            O_thermal = np.sum(np.diag(global_op) * np.exp(-1 * xi_beta * evals)) / Z_beta[xi_beta_idx]
 
             axes_sig[op_idx].plot(TSPACE, measurement, label=f'$L={L}$', color=f'C{color_idx}')
             axes_sig[op_idx].axhline(O_thermal, label=rf'$L={L}$ Thermal Limit', color=f'C{color_idx}', linestyle='dotted')
@@ -161,7 +156,7 @@ def p4_1_12():
     axes_sig[0].set_ylabel(r'$\langle \sigma_1^\mu(t) \rangle$')
     handles, labels = axes_sig[0].get_legend_handles_labels()
     fig_sig.legend(handles, labels, **LEGEND_OPTIONS)
-    fig_sig.savefig(FIGS_DIR + 'p4_1_1.png', **FIG_SAVE_OPTIONS)
+    fig_sig.savefig(FIGS_DIR + 'p4_1_1_sigma.png', **FIG_SAVE_OPTIONS)
 
     axes_beta.set_xlabel(r'$\beta$')
     axes_beta.set_ylabel(r'$E_\beta$')
@@ -249,10 +244,10 @@ def p4_3_1():
 
 
 if __name__ == '__main__':
-    # p4_1_12()
+    p4_1_12()
 
-    p4_1_3()
-
-    p4_2_12()
+    # p4_1_3()
+    #
+    # p4_2_12()
 
 
