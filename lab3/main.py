@@ -47,6 +47,11 @@ def make_dense_H(L, note=None):
     return H
 
 
+@utility.cache('npy', CACHE_DIR + 'dense_H')
+def make_dense_H_rand(L, note=None):
+    pass
+
+
 @utility.cache('npz', CACHE_DIR + 'l3_dense_eigs')
 def dense_eigs(L, note=None):
     """
@@ -123,7 +128,7 @@ def p4_1_12():
         # c_m^* c_n
         coeffs = np.multiply.outer(xi_state.conj(), xi_state)
 
-        # p4_1_2 stuff
+        # p4_1_2 calculations
         beta_space = np.linspace(-3, 3, 10000)
         Z_beta = np.array([np.sum(np.exp(-beta * evals)) for beta in beta_space])
         E_beta = np.array([np.sum(np.exp(-beta * evals) * evals) for beta in beta_space]) / Z_beta
@@ -202,7 +207,7 @@ def p4_1_3():
 
 def p4_2_12():
     fig_expval, axes_expval = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
-    fig_entropy, axes_entropy = plt.subplots(figsize=(15, 5))
+    fig_entropy, axes_entropy = plt.subplots(figsize=(10, 5))
     for L in LSPACE:
         eigs = dense_eigs(L, note=f'L{L}')
         evals = eigs['evals']
@@ -215,7 +220,7 @@ def p4_2_12():
         k0_evals = evals[k0_sector]
         k0_evecs = evecs[:, k0_sector]
 
-        for op_idx, op in ops:
+        for op_idx, op in enumerate(ops):
             global_op = globalize_op(L, ops[op])
             sigma_expvals = np.sum(k0_evecs.conj() * (global_op @ k0_evecs), axis=0)
 
@@ -223,7 +228,7 @@ def p4_2_12():
             axes_expval[op_idx].set_xlabel(r'$\varepsilon_n / L$')
             axes_expval[op_idx].set_title(rf'$\mu={op}$')
 
-        entropy = l2main.get_entropy(k0_evecs.T, L//2, note=f'p4_2_2_entropy_L{L}_op{op}')
+        entropy = l2main.get_entropy(k0_evecs.T, L//2, note=f'p4_2_2_entropy_L{L}')
 
         axes_entropy.plot(k0_evals / L, entropy/L, label=rf'$L={L}$')
         axes_entropy.set_xlabel(r'$\varepsilon_n / L$')
@@ -239,10 +244,15 @@ def p4_2_12():
     fig_entropy.savefig(FIGS_DIR + 'p4_2_2.png', **FIG_SAVE_OPTIONS)
 
 
+def p4_3_1():
+    pass
+
 
 if __name__ == '__main__':
-    p4_1_12()
+    # p4_1_12()
 
-    # p4_1_3()
+    p4_1_3()
+
+    p4_2_12()
 
 
