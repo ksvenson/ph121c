@@ -11,8 +11,8 @@ FIGS_DIR = './figs/'
 LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
 FIG_SAVE_OPTIONS = {'bbox_inches': 'tight'}
 
-LSPACE = np.arange(8, 9, 2)
-TSPACE = np.linspace(0, 10, 100)
+LSPACE = np.arange(8, 15, 2)
+TSPACE = np.linspace(0, 50, 1000)
 beta_space = np.linspace(-3, 3, int(1e6))
 
 FIELD_VALS = {'hx': -1.05, 'hz': 0.5}
@@ -68,6 +68,9 @@ def make_scar_H(L, Omega, note=None):
 
         # Omega term
         H[i ^ (1 << flips), i] += Omega/2
+        # 1/4 term in P_{j, j+1}
+        H[i, i] += (1/4) * (2 * i.bit_count() - L)
+        #
 
 
 
@@ -84,6 +87,17 @@ def dense_eigs(L, W=None, note=None):
     H = make_dense_H(L, W=W, note=note)
     evals, evecs = sp.linalg.eigh(H)
     return {'evals': evals, 'evecs': evecs}
+
+
+def cycle_bits(bits, L, l):
+    """
+    Cycles the bits in `bits` by `l` positions to the left.
+    For example, `cycle_bits(0b101, 3, 1)` returns `0b110`.
+    :param bits: bit string.
+    :param L: length of bit string (to know how many leading zeros there are)
+    :return: cycled bit string.
+    """
+    pass
 
 
 def make_prod_state(L, up_coeff, down_coeff):
@@ -145,7 +159,7 @@ def ham_analysis(prob, W=None):
     :return: Nothing. Saves plots to `FIGS_DIR`.
     """
     np.random.seed(628)
-    fig_sig, axes_sig = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
+    fig_sig, axes_sig = plt.subplots(3, 1, sharex=True, sharey=True, figsize=(15, 15))
     fig_beta, axes_beta = plt.subplots(figsize=(5, 5))
     fig_entropy, axes_entropy = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(10, 5))
     for color_idx, L in enumerate(LSPACE):
@@ -179,7 +193,7 @@ def ham_analysis(prob, W=None):
 
             axes_sig[op_idx].plot(TSPACE, measurement, label=f'$L={L}$', color=f'C{color_idx}')
             axes_sig[op_idx].axhline(O_thermal, label=rf'$L={L}$ Thermal Limit', color=f'C{color_idx}', linestyle='dotted')
-            axes_sig[op_idx].set_xlabel('Time $t$')
+            axes_sig[op_idx].set_ylabel(rf'$\langle \sigma_1^{op}(t) \rangle$')
             axes_sig[op_idx].set_title(rf'$\mu={op}$')
         axes_beta.plot(beta_space, E_beta, label=rf'$L={L}$')
 
@@ -198,7 +212,7 @@ def ham_analysis(prob, W=None):
             axes_entropy[ax_idx].set_xlabel(r'Time $t$')
             ax_idx += 1
 
-    axes_sig[0].set_ylabel(r'$\langle \sigma_1^\mu(t) \rangle$')
+    axes_sig[-1].set_xlabel('Time $t$')
     handles, labels = axes_sig[0].get_legend_handles_labels()
     fig_sig.legend(handles, labels, **LEGEND_OPTIONS)
     fig_sig.savefig(FIGS_DIR + f'{prob}_sigma.png', **FIG_SAVE_OPTIONS)
@@ -262,12 +276,12 @@ def p4_2_12():
 
 
 def p4_3_1():
-    W = 20
-    ham_analysis(f'p4_3_1_W{W}', W=W)
+    for W in (3, 10):
+        ham_analysis(f'p4_3_1_W{W}', W=W)
 
 
 if __name__ == '__main__':
-    # p4_1_123()
+    p4_1_123()
 
     # p4_2_12()
 
