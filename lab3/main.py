@@ -11,9 +11,9 @@ FIGS_DIR = './figs/'
 LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
 FIG_SAVE_OPTIONS = {'bbox_inches': 'tight'}
 
-LSPACE = np.arange(8, 15, 2)
+LSPACE = np.arange(8, 9, 2)
 TSPACE = np.linspace(0, 10, 100)
-beta_space = np.linspace(-3, 3, 10000)
+beta_space = np.linspace(-3, 3, int(1e6))
 
 FIELD_VALS = {'hx': -1.05, 'hz': 0.5}
 
@@ -25,23 +25,7 @@ ops = {
 }
 
 
-@utility.cache('npy', CACHE_DIR + 'dense_H')
-def make_dense_H_old(L, note=None):
-    H = np.zeros((2**L, 2**L))
-    for i in range(2**L):
-        # Perform a XOR between states, and states shifted by 1 bit. Make sure that last bit is set to zero.
-        H[i, i] += 2 * ((i & ~(1 << L-1)) ^ (i >> 1)).bit_count() - (L-1)
-        # Include the periodic term.
-        H[i, i] += 2 * ((i ^ (i >> (L - 1))) % 2) - 1
-        # h_z field
-        H[i, i] += -1 * FIELD_VALS['hz'] * (2 * i.bit_count() - L)
-        # h_x field
-        flips = np.arange(L)
-        H[i ^ (1 << flips), i] += -1 * FIELD_VALS['hx']
-    return H
-
-
-@utility.cache('npy', CACHE_DIR + 'dense_H_rand')
+@utility.cache('npy', CACHE_DIR + 'l3_dense_H')
 def make_dense_H(L, W=None, note=None):
     """
     Makes Hamiltonian in sigma_z basis as defined in Equation 8 and 11 with periodic boundary conditions.
@@ -65,17 +49,27 @@ def make_dense_H(L, W=None, note=None):
             # h_x field
             H[i ^ (1 << flips), i] += -1 * FIELD_VALS['hx']
         else:
-            np.random.seed(271)
             hx = np.random.uniform(-W, W, L)
             hz = np.random.uniform(-W, W, L)
 
             # h_z field
-            sigma_z = 2 * np.array([int(bit) for bit in bin(i)[2:]]) - 1
+            sigma_z = 2 * np.array([int(bit) for bit in format(i, f'0{L}b')]) - 1
             H[i, i] += -1 * np.sum(hz * sigma_z)
 
             # h_x field
             H[i ^ (1 << flips), i] += -1 * hx
     return H
+
+
+def make_scar_H(L, Omega, note=None):
+    H = np.zeros((2**L, 2**L))
+    for i in range(2**L):
+        flips = np.arange(L)
+
+        # Omega term
+        H[i ^ (1 << flips), i] += Omega/2
+
+
 
 
 @utility.cache('npz', CACHE_DIR + 'l3_dense_eigs')
@@ -130,6 +124,11 @@ def rebase_operator(L, op, evecs):
 
 
 def make_trans_op(L):
+    """
+    Creates the translation operator as defined in 4.2.1. in the sigma z basis.
+    :param L: system size.
+    :return: translation operator.
+    """
     T = np.zeros((2**L, 2**L))
     for state in range(2**L):
         last_bit = state & 1
@@ -138,13 +137,20 @@ def make_trans_op(L):
     return T
 
 
-def ham_analysis(plot_sig, plot_beta, plot_entropy, W=None, note=None):
-    fig_sig, axes_sig = plot_sig
-    fig_beta, axes_beta = plot_beta
-    fig_entropy, axes_entropy = plot_entropy
+def ham_analysis(prob, W=None):
+    """
+    Makes all necessary plots for 4.1.1., 4.1.2, and 4.3.1. Leave `W=None` for translation symmetry.
+    :param prob: a tag used to name figures.
+    :param W: uniform distribution parameter
+    :return: Nothing. Saves plots to `FIGS_DIR`.
+    """
+    np.random.seed(628)
+    fig_sig, axes_sig = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
+    fig_beta, axes_beta = plt.subplots(figsize=(5, 5))
+    fig_entropy, axes_entropy = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(10, 5))
     for color_idx, L in enumerate(LSPACE):
         print(f'L={L}')
-        eigs = dense_eigs(L, W=W, note=note)
+        eigs = dense_eigs(L, W=W, note=f'{prob}_L{L}')
         evals = eigs['evals']
         evecs = eigs['evecs']
 
@@ -157,6 +163,7 @@ def ham_analysis(plot_sig, plot_beta, plot_entropy, W=None, note=None):
         # evolving the expectation value, like in Equation 3.
         evolved_states = (propagator * xi_state).T
 
+        # Thermal calculations
         Z_beta = np.array([np.sum(np.exp(-beta * evals)) for beta in beta_space])
         E_beta = np.array([np.sum(np.exp(-beta * evals) * evals) for beta in beta_space]) / Z_beta
         xi_eng = np.sum(xi_state.conj() * evals * xi_state)
@@ -176,56 +183,41 @@ def ham_analysis(plot_sig, plot_beta, plot_entropy, W=None, note=None):
             axes_sig[op_idx].set_title(rf'$\mu={op}$')
         axes_beta.plot(beta_space, E_beta, label=rf'$L={L}$')
 
+        # Entropy calculations
+        my_state = make_prod_state(L, -1/np.sqrt(2), 1/np.sqrt(2))
+        my_state = evecs.T.conj() @ my_state
+        my_evolved_states = (propagator * my_state).T
+        states = {'xi': evolved_states, 'my': my_evolved_states}
+        ax_idx = 0
+        for tag, states in states.items():
+            # convert states back to sigma z basis:
+            sigz_states = evecs @ states
+            entropy = l2main.get_entropy(sigz_states.T, L//2, note=f'{prob}_L{L}_{tag}_entropy_trace')
+
+            axes_entropy[ax_idx].plot(TSPACE, entropy, label=rf'$L={L}$')
+            axes_entropy[ax_idx].set_xlabel(r'Time $t$')
+            ax_idx += 1
+
     axes_sig[0].set_ylabel(r'$\langle \sigma_1^\mu(t) \rangle$')
     handles, labels = axes_sig[0].get_legend_handles_labels()
     fig_sig.legend(handles, labels, **LEGEND_OPTIONS)
-    fig_sig.savefig(FIGS_DIR + 'p4_1_1_sigma.png', **FIG_SAVE_OPTIONS)
+    fig_sig.savefig(FIGS_DIR + f'{prob}_sigma.png', **FIG_SAVE_OPTIONS)
 
     axes_beta.set_xlabel(r'$\beta$')
     axes_beta.set_ylabel(r'$E_\beta$')
     fig_beta.legend(**LEGEND_OPTIONS)
-    fig_beta.savefig(FIGS_DIR + 'p4_1_2_E_beta.png', **FIG_SAVE_OPTIONS)
+    fig_beta.savefig(FIGS_DIR + f'{prob}_E_beta.png', **FIG_SAVE_OPTIONS)
+
+    axes_entropy[0].set_title(r'$\otimes \frac{1}{2}(|\uparrow\rangle - \sqrt{3}|\downarrow\rangle)$')
+    axes_entropy[1].set_title(r'$\otimes \frac{1}{\sqrt{2}}(-|\uparrow\rangle + |\downarrow\rangle)$')
+    axes_entropy[0].set_ylabel(r'$S_{L/2}(t)$')
+    handles, labels = axes_entropy[0].get_legend_handles_labels()
+    fig_entropy.legend(handles, labels, **LEGEND_OPTIONS)
+    fig_entropy.savefig(FIGS_DIR + f'{prob}_entropy.png', **FIG_SAVE_OPTIONS)
 
 
-def p4_1_12():
-    fig_sig, axes_sig = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
-    fig_beta, axes_beta = plt.subplots(figsize=(5, 5))
-
-
-def p4_1_3():
-    fig, axes = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(10, 5))
-    for L in LSPACE:
-        eigs = dense_eigs(L, note=f'L{L}')
-        evals = eigs['evals']
-        evecs = eigs['evecs']
-
-        xi_state = make_prod_state(L, 1/2, -np.sqrt(3)/2)
-        xi_state = evecs.T.conj() @ xi_state
-
-        my_state = make_prod_state(L, -1/np.sqrt(2), 1/np.sqrt(2))
-        my_state = evecs.T.conj() @ my_state
-
-        propagator = np.exp(-1j * np.multiply.outer(TSPACE, evals))
-
-        states = {'xi': xi_state, 'my': my_state}
-        ax_idx = 0
-        for tag, state in states.items():
-            evolved_states = propagator * state
-            # convert states back to sigma z basis:
-            evolved_states = (evecs @ evolved_states.T).T
-            entropy = l2main.get_entropy(evolved_states, L//2, note=f'p4_1_3_L{L}_{tag}_entropy_trace')
-
-            axes[ax_idx].plot(TSPACE, entropy, label=rf'$L={L}$')
-            axes[ax_idx].set_xlabel(r'Time $t$')
-            ax_idx += 1
-
-    axes[0].set_title(r'$\otimes \frac{1}{2}(|\uparrow\rangle - \sqrt{3}|\downarrow\rangle)$')
-    axes[1].set_title(r'$\otimes \frac{1}{\sqrt{2}}(-|\uparrow\rangle + |\downarrow\rangle)$')
-
-    axes[0].set_ylabel(r'$S_{L/2}(t)$')
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, **LEGEND_OPTIONS)
-    fig.savefig(FIGS_DIR + 'p4_1_3.png', **FIG_SAVE_OPTIONS)
+def p4_1_123():
+    ham_analysis('p4_1_123', W=None)
 
 
 def p4_2_12():
@@ -270,14 +262,15 @@ def p4_2_12():
 
 
 def p4_3_1():
-    pass
+    W = 20
+    ham_analysis(f'p4_3_1_W{W}', W=W)
 
 
 if __name__ == '__main__':
-    # p4_1_12()
+    # p4_1_123()
 
-    # p4_1_3()
+    # p4_2_12()
 
-    p4_2_12()
+    p4_3_1()
 
 
