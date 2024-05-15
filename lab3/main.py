@@ -37,10 +37,9 @@ def make_dense_H(L, W=None, note=None):
     """
     H = np.zeros((2**L, 2**L))
     for i in range(2**L):
-        # Perform a XOR between states, and states shifted by 1 bit. Make sure that last bit is set to zero.
-        H[i, i] += 2 * ((i & ~(1 << L-1)) ^ (i >> 1)).bit_count() - (L-1)
-        # Include the periodic term.
-        H[i, i] += 2 * ((i ^ (i >> (L - 1))) % 2) - 1
+        # Perform a XOR between states, and states shifted by 1 bit.
+        H[i, i] += 2 * (i ^ cycle_bits(i, L, 1)).bit_count() - L
+
         flips = np.arange(L)
         if W is None:
             # h_z field
@@ -91,13 +90,13 @@ def dense_eigs(L, W=None, note=None):
 
 def cycle_bits(bits, L, l):
     """
-    Cycles the bits in `bits` by `l` positions to the left.
+    Cycles the bits in `bits` by `l` positions to the right.
     For example, `cycle_bits(0b101, 3, 1)` returns `0b110`.
     :param bits: bit string.
     :param L: length of bit string (to know how many leading zeros there are)
     :return: cycled bit string.
     """
-    pass
+    return ((bits >> l) | (bits << (L-l))) & (2**L - 1)
 
 
 def make_prod_state(L, up_coeff, down_coeff):
@@ -144,10 +143,8 @@ def make_trans_op(L):
     :return: translation operator.
     """
     T = np.zeros((2**L, 2**L))
-    for state in range(2**L):
-        last_bit = state & 1
-        cycle = (state >> 1) | (last_bit << (L-1))
-        T[cycle, state] = 1
+    states = np.arange(2**L)
+    T[cycle_bits(states, L, 1), states] = 1
     return T
 
 
@@ -158,7 +155,6 @@ def ham_analysis(prob, W=None):
     :param W: uniform distribution parameter
     :return: Nothing. Saves plots to `FIGS_DIR`.
     """
-    np.random.seed(628)
     fig_sig, axes_sig = plt.subplots(3, 1, sharex=True, sharey=True, figsize=(15, 15))
     fig_beta, axes_beta = plt.subplots(figsize=(5, 5))
     fig_entropy, axes_entropy = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(10, 5))
@@ -281,9 +277,11 @@ def p4_3_1():
 
 
 if __name__ == '__main__':
+    np.random.seed(628)  # tau = 2 pi - the better circle constant!
+
     p4_1_123()
 
-    # p4_2_12()
+    p4_2_12()
 
     p4_3_1()
 
