@@ -7,17 +7,17 @@ CACHE_DIR = './data/'
 
 
 class MPS():
-    def __init__(self, L, A1, A, AL):
+    """
+    Represents an MPS state.
+    """
+    def __init__(self, L, A_list):
         """
-
-        :param A1: A^1 tensor, organized in row vectors
-        :param A: List of A^j tensors. Required that `A.shape[0] == L-2`.
-        :param AL: A^L tensor, organized in column vectors.
+        Creates an MPS given the list of A tensors.
+        :param L: System size.
+        :param A_list: List of A^j tensors.
         """
         self.L = L
-        self.A1 = A1
-        self.A = A
-        self.AL = AL
+        self.A_list = A_list
 
     @classmethod
     def make_from_state(cls, state, k, L):
@@ -29,25 +29,22 @@ class MPS():
         :return: MPS object representing `state`.
         """
         A_list = []
-        M = state.reshape(2, 2 ** (L - 1))
-        U, s, Vh = np.linalg.svd(M, full_matrices=False)
-        A1 = U[:, :k]
-        W = np.einsum('a,ab->ab', s[:k], Vh[:k])
-        AL = cls.make_from_state_helper(W, k, 2, L, A_list)
-        return cls(L, A1, np.array(A_list), AL)
+        W = state.reshape(1, 2**L)
+        cls.make_from_state_helper(W, k, 1, L, A_list)
+        return cls(L, A_list)
 
     @classmethod
-    def make_from_state_helper(cls, arr, k, A_counter, L, A_list):
+    def make_from_state_helper(cls, W, k, A_counter, L, A_list):
         """
         Helper method for `make_from_state`. Appends A^{`A_counter`} to the end of `A_list`.
-        :param arr: Next W tensor to perform an SVD on.
+        :param W: Next W tensor to perform an SVD on.
         :param k: Bond dimension
         :param A_counter: See general function description above.
         :param L: System size.
         :param A_list: Growing list for the A^j tensors.
         :return: A^L.
         """
-        M = arr.reshape(arr.shape[0] * 2, arr.shape[1] // 2)
+        M = W.reshape(W.shape[0] * 2, W.shape[1] // 2)
         U, s, Vh = np.linalg.svd(M, full_matrices=False)
 
         # Even indices of `U` become (A^j)^0, and odd indices (A^j)^1
@@ -56,17 +53,17 @@ class MPS():
 
         W = np.einsum('a,ab->ab', s[:k], Vh[:k])
         if A_counter == L - 1:
-            return W
+            A_list.append(W[:k].T.reshape(2, 1, min(2, k)))
         else:
-            return cls.make_from_state_helper(W, k, A_counter + 1, L, A_list)
+            cls.make_from_state_helper(W, k, A_counter + 1, L, A_list)
 
     def apply_H(self, hx, hz, dt):
-        H_A1 = self.A1.copy()
-        H_A = self.A.copy()
-        H_AL = self.AL.copy()
+        self.apply_field(hx, hz, dt)
+        self.apply_H_odd(dt)
+        self.apply_H_even(dt)
 
-        # Applying the field operator first.
-        mag = np.sqrt(hx**2 + hz**2)
+    def apply_field(self, hx, hz, dt):
+        mag = np.sqrt(hx ** 2 + hz ** 2)
         phi = dt * mag
         # Slightly modified matrix than that in Equation 20.
         # This is because we work in a basis were the zero index corresponds to spin down.
@@ -75,18 +72,34 @@ class MPS():
             [-hx, -hz]
         ]) / mag
         field = np.cosh(phi) * np.identity(2) - np.sinh(phi) * n_dot_sigma
-        H_A1 = np.einsum('ab,bc->ac', field, H_A1)
-        H_A = np.einsum('ab,bcd->acd', field, H_A)
-        H_AL = np.einsum('ab,cb->ac', field, H_A)
-        # H_A1 = np.tensordot(field, H_A1, axes=([1], [0]))
+        for idx, A in enumerate(self.A_list):
+            self.A_list[idx] = np.einsum('ab,bcd->acd', field, A)
         # H_A = np.tensordot(field, H_A, axes=([1], [0]))
-        # H_AL = np.tensordot(field, H_AL, axes=([1], [1]))
 
-        # Applying H_odd exponential second
-        for j in range(0, self.L, 2):
-            pass
+    def apply_H_odd(self, dt):
+        # helper matrix
+        xor = np.array([
+            [1, -1],
+            [-1, 1]
+        ])
+        xor = np.exp(dt * xor)
+        for j in range(0, self.L-1, 2):
+            # multiply A^j and A^{j+1} together
+            W = np.einsum('abc,dce->adbe', self.A_list[j], self.A_list[j+1])
+            # multiply by the 2-site operator
+            W = np.einsum('ab,abcd->abcd', xor, W)
+            # reshape W for the svd
+            W = np.moveaxis(W, (0, 1, 2, 3), (1, 2, 0, 3))
+            W.reshape(W.shape[0]*W.shape[1], W.shape[2]*W.shape[3])
 
-        # Applying H_even exponential third
+            U, s, Vh = np.linalg.svd(W, full_matrices=False)
+            self.A_list[j] = np.stack((U[::2], U[1::2]))
+            sVh = np.einsum('a,ab->ab', s, Vh)
+            split_idx = sVh.shape[1] // 2
+            self.A_list[j+1] = np.stack((sVh[:, :split_idx], sVh[:, split_idx:]))
+
+    def apply_H_even(self, dt):
+        pass
 
 
 def p4_1(lspace):
@@ -94,19 +107,15 @@ def p4_1(lspace):
         state = np.zeros(2**L)
         state[-1] = 1
         mps = MPS.make_from_state(state, 1, L)
-        print(mps.A1)
-        print(mps.A)
-        print(mps.AL)
+        for A in mps.A_list:
+            print(A.shape)
 
-        print(mps.A1.shape)
-        print(mps.A.shape)
-        print(mps.AL.shape)
         quit()
 
 
 
 if __name__ == '__main__':
-    lspace = np.arange(5, 10)
+    lspace = np.arange(8, 10)
 
     p4_1(lspace)
 
