@@ -59,8 +59,8 @@ class MPS():
 
     def apply_H(self, hx, hz, dt):
         self.apply_field(hx, hz, dt)
-        self.apply_H_odd(dt)
-        self.apply_H_even(dt)
+        self.apply_two_site(dt, 0)
+        self.apply_two_site(dt, 1)
 
     def apply_field(self, hx, hz, dt):
         mag = np.sqrt(hx ** 2 + hz ** 2)
@@ -76,14 +76,14 @@ class MPS():
             self.A_list[idx] = np.einsum('ab,bcd->acd', field, A)
         # H_A = np.tensordot(field, H_A, axes=([1], [0]))
 
-    def apply_H_odd(self, dt):
+    def apply_two_site(self, dt, parity):
         # helper matrix
         xor = np.array([
             [1, -1],
             [-1, 1]
         ])
         xor = np.exp(dt * xor)
-        for j in range(0, self.L-1, 2):
+        for j in range(parity, self.L-1, 2):
             # multiply A^j and A^{j+1} together
             W = np.einsum('abc,dce->adbe', self.A_list[j], self.A_list[j+1])
             # multiply by the 2-site operator
@@ -97,9 +97,6 @@ class MPS():
             sVh = np.einsum('a,ab->ab', s, Vh)
             split_idx = sVh.shape[1] // 2
             self.A_list[j+1] = np.stack((sVh[:, :split_idx], sVh[:, split_idx:]))
-
-    def apply_H_even(self, dt):
-        pass
 
 
 def p4_1(lspace):
