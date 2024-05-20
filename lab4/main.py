@@ -55,14 +55,14 @@ class MPS:
             s = s[:k]
             Vh = Vh[:k]
         if left:
-            Vh = np.einsum('a,ab->ab', s, Vh)
-        else:
             U = np.einsum('ab,b->ab', U, s)
+        else:
+            Vh = np.einsum('a,ab->ab', s, Vh)
         split_idx = Vh.shape[1] // 2
         return np.stack((U[::2], U[1::2])), np.stack((Vh[:, :split_idx], Vh[:, split_idx:]))
 
     @classmethod
-    def make_from_state(cls, state, k, L, hx=None, hz=None):
+    def make_from_state(cls, state, k, L, hx=None, hz=None, ortho_center=None):
         """
         Returns an MPS representing `state` in the sigma z basis.
         :param state: State in the sigma z basis.
@@ -70,12 +70,17 @@ class MPS:
         :param L: System size.
         :param hx: x field parameter.
         :param hz: z field parameter.
+        :param ortho_center: Desired location of the orthonormality center.
         :return: MPS object representing `state`.
         """
         A_list = []
         W = state.reshape(1, 2**L)
         cls.__make_from_state_helper(W, k, 1, L, A_list)
-        return cls(L, A_list, L-1, hx, hz)
+        mps = cls(L, A_list, L-1, hx, hz)
+        if ortho_center is not None:
+            for _ in range(L - ortho_center - 1):
+                mps.shift_ortho_center(k=k, left=True)
+        return mps
 
     @classmethod
     def __make_from_state_helper(cls, W, k, A_counter, L, A_list):
@@ -122,19 +127,40 @@ class MPS:
             W = np.einsum('abc,dce->adbe', self.A_list[j], self.A_list[j+1])
             # multiply by the 2-site operator
             W = np.einsum('ab,abcd->abcd', exp_xor, W)
-            self.A_list[j], self.A_list[j+1] = self.__class__.__svd_W(W)
+            self.A_list[j], self.A_list[j+1] = self.__class__.__svd_W(W, left=False)
 
     def __restore_canonical(self, k):
-        # First, we sweep left to right without truncating
-        for j in range(self.L-1):
-            W = np.einsum('abc,dce->adbe', self.A_list[j], self.A_list[j+1])
-            self.A_list[j], self.A_list[j+1] = self.__class__.__svd_W(W)
-
-        # Second, we sweep right to left with truncating
-        for j in range(self.L-1, 0, -1):
-            W = np.einsum('abc,dce->adbe', self.A_list[j-1], self.A_list[j])
-            self.A_list[j-1], self.A_list[j] = self.__class__.__svd_W(W, k=k, left=False)
         self.ortho_center = 0
+        # First, we sweep left -> right to right without truncating
+        self.sweep(k=None, left=False)
+        # Second, we sweep right -> left to left with truncating
+        self.sweep(k=k, left=True)
+
+    def shift_ortho_center(self, k=None, left=True):
+        if left:
+            assert self.ortho_center != 0
+            l_idx = self.ortho_center - 1
+            r_idx = self.ortho_center
+        else:
+            assert self.ortho_center != self.L - 1
+            l_idx = self.ortho_center
+            r_idx = self.ortho_center + 1
+
+        W = np.einsum('abc,dce->adbe', self.A_list[l_idx], self.A_list[r_idx])
+        self.A_list[l_idx], self.A_list[r_idx] = self.__class__.__svd_W(W, k=k, left=left)
+
+        if left:
+            self.ortho_center -= 1
+        else:
+            self.ortho_center += 1
+
+    def sweep(self, k=None, left=True):
+        if left:
+            assert self.ortho_center == self.L-1
+        else:
+            assert self.ortho_center == 0
+        for _ in range(self.L-1):
+            self.shift_ortho_center(k=k, left=left)
 
     def measure_energy(self):
         assert self.ortho_center == 0
@@ -154,9 +180,7 @@ class MPS:
                 energy += np.sum(self.xor * traces)
 
                 # Move the orthogonality center to site j+1
-                W = np.einsum('abc,dce->adbe', A, next_A)
-                self.A_list[j], self.A_list[j+1] = self.__class__.__svd_W(W)
-        self.ortho_center = self.L - 1
+                self.shift_ortho_center(left=False)
         return energy
 
 
@@ -167,20 +191,18 @@ def p4_1(lspace, dt=0.1, N=10, hx=None, hz=None, k=16):
         evecs = eigs['evecs']
         h_idx = 8
 
-
         state = np.zeros(2**L)
         state[-1] = 1
-        state[0] = 1
-        state /= np.sqrt(2)
+        # state[0] = 1
+        # state /= np.sqrt(2)
 
         # state = evecs[h_idx, :, 0]
 
-        mps = MPS.make_from_state(state, 1, L, hx=hx, hz=hz)
-        # we can artificially move the orthogonality center because the bond dimension is 1
-        mps.ortho_center = 0
-        # print(f'initial shapes')
-        # for A in mps.A_list:
-        #     print(A.shape)
+        mps = MPS.make_from_state(state, 2, L, hx=hx, hz=hz, ortho_center=0)
+        print(f'initial A list:')
+        for A in mps.A_list:
+            print(A)
+            print('-'*100)
         energy = []
         for _ in range(N):
             energy.append(mps.measure_energy())
@@ -197,4 +219,4 @@ def p4_1(lspace, dt=0.1, N=10, hx=None, hz=None, k=16):
 
 
 if __name__ == '__main__':
-    p4_1(np.arange(8, 9), hx=1, hz=0)
+    p4_1(np.arange(5, 6), hx=1, hz=0)
