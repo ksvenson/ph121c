@@ -183,6 +183,20 @@ class MPS:
                 self.shift_ortho_center(left=False)
         return energy
 
+    def check_canonical(self, j, left=True):
+        A = self.A_list[j]
+        A_dag = np.einsum('abc->acb', A).conj()
+        if left:
+            res = np.einsum('abc,acd->bd', A_dag, A)
+        else:
+            res = np.einsum('abc,acd->bd', A, A_dag)
+        comp = np.identity(res.shape[0])
+        if left:
+            lr = 'left'
+        else:
+            lr = 'right'
+        print(f'Site {j} {lr} canonical score: {np.linalg.norm(res - comp)}')
+
 
 def p4_1(lspace, dt=0.1, N=10, hx=None, hz=None, k=16):
     for L in lspace:
@@ -199,10 +213,14 @@ def p4_1(lspace, dt=0.1, N=10, hx=None, hz=None, k=16):
         # state = evecs[h_idx, :, 0]
 
         mps = MPS.make_from_state(state, 2, L, hx=hx, hz=hz, ortho_center=0)
-        print(f'initial A list:')
-        for A in mps.A_list:
-            print(A)
-            print('-'*100)
+        for j in range(L):
+            mps.check_canonical(j, left=False)
+
+
+        # print(f'initial A list:')
+        # for A in mps.A_list:
+        #     print(A)
+        #     print('-'*100)
         energy = []
         for _ in range(N):
             energy.append(mps.measure_energy())
