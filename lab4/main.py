@@ -208,6 +208,10 @@ class MPS:
             contract = np.einsum('abc,cd,ade->be', A_dag, contract, A)
         return np.trace(contract)
 
+    def renormalize(self):
+        # We renormalize at the orthogonality center so that we maintain the canonical form
+        self.A_list[self.ortho_center] /= np.sqrt(self.norm())
+
 
 def p4_1(lspace, dt=0.1, N=10, hx=None, hz=None, k=16):
     for L in lspace:
@@ -216,47 +220,53 @@ def p4_1(lspace, dt=0.1, N=10, hx=None, hz=None, k=16):
         evecs = eigs['evecs']
         h_idx = 8
 
-        # state = np.zeros(2**L)
-        # state[-1] = 1
+        state = np.zeros(2**L)
+        state[-1] = 1
         # state[0] = 1
         # state /= np.sqrt(2)
 
-        state = evecs[h_idx, :, 0]
+        # state = evecs[h_idx, :, 0]
 
-        mps = MPS.make_from_state(state, 100, L, hx=hx, hz=hz, ortho_center=0)
+        mps = MPS.make_from_state(state, 1, L, hx=hx, hz=hz, ortho_center=0)
 
         energy = []
-        true_energy = []
+        # true_energy = []
         count = 0
         for _ in range(N):
             energy.append(mps.measure_energy())
-            true_energy.append(np.exp(-2 * dt*count * evals[h_idx, 0]) * evals[h_idx, 0])
+            # true_energy.append(np.exp(-2 * dt*count * evals[h_idx, 0]) * evals[h_idx, 0])
             mps.evolve(dt, k)
+            mps.renormalize()
             count += 1
+        print(f'final energy: {energy[-1]}')
+        print(f'true energy: {evals[h_idx, 0]}')
 
     energy = np.array(energy)
-    true_energy = np.array(true_energy)
+    # true_energy = np.array(true_energy)
 
-    energy = np.abs(energy)
-    true_energy = np.abs(true_energy)
+    # energy = np.abs(energy)
+    # true_energy = np.abs(true_energy)
 
-    error = np.abs(energy - true_energy)/true_energy
+    # error = np.abs(energy - true_energy)/true_energy
 
     plt.figure()
     tspace = np.arange(0, dt * N, dt)
-    # plt.plot(tspace, energy, label='MPS energy')
+    plt.plot(tspace, energy, label='MPS energy')
     # plt.plot(tspace, true_energy, label='true energy')
-    plt.plot(error)
+    # plt.plot(error)
     plt.xlabel('time')
     plt.ylabel('energy')
     # plt.yscale('log')
     plt.savefig(FIG_DIR + 'gnd_energy.png')
 
-    print('energy:')
-    print(energy)
-    print('true energy:')
-    print(true_energy)
+    # print('energy:')
+    # print(energy)
+    # print('true energy:')
+    # print(true_energy)
 
 
 if __name__ == '__main__':
-    p4_1(np.arange(5, 6), k=16, hx=1, hz=0)
+    final_time = 10
+    DT = 0.01
+    num = int(final_time / DT)
+    p4_1(np.arange(5, 6), dt=DT, N=num, k=16, hx=1, hz=0)
