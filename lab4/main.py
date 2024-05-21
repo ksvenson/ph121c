@@ -55,7 +55,7 @@ class MPS:
             s = s[:k]
             Vh = Vh[:k]
         if left:
-            U = np.einsum('ab,b->ab', U, s)
+            U *= s
         else:
             Vh = np.einsum('a,ab->ab', s, Vh)
         split_idx = Vh.shape[1] // 2
