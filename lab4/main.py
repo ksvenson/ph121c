@@ -1,11 +1,40 @@
 import numpy as np
 import scipy as sp
 import matplotlib.pyplot as plt
+import utility
 
 FIG_DIR = './figs/'
 CACHE_DIR = './data/'
 
 FIELD_VALS = {'hx': -1.05, 'hz': 0.5}
+
+
+@utility.cache('npy', CACHE_DIR + 'l4_dense_H')
+def make_dense_H(L, hx=None, hz=None, note=None):
+    if hx is None:
+        hx = FIELD_VALS['hx']
+    if hz is None:
+        hz = FIELD_VALS['hz']
+    H = np.zeros((2**L, 2**L))
+    for i in range(2**L):
+        # Perform a XOR between states, and states shifted by 1 bit. Make sure that the first bit is zero.
+        H[i, i] += 2 * ((i & ~(1 << L-1)) ^ (i >> 1)).bit_count() - (L-1)
+
+        # h_z field
+        H[i, i] += -1 * hz * (2 * i.bit_count() - L)
+
+        # h_x field
+        flips = np.arange(L)
+        H[i ^ (1 << flips), i] += -1 * hx
+    return H
+
+
+@utility.cache('npz', CACHE_DIR + 'l4_dense_eigs')
+def dense_eigs(L, hx=None, hz=None, note=None):
+    print(f'finding dense evals: L={L}')
+    H = make_dense_H(L, hx=hx, hz=hz, note=note)
+    evals, evecs = sp.linalg.eigh(H)
+    return {'evals': evals, 'evecs': evecs}
 
 
 class MPS:
@@ -198,60 +227,45 @@ class MPS:
         self.A_list[self.ortho_center] /= np.sqrt(self.norm())
 
 
-def p4_1(lspace, dt=0.1, N=10, hx=None, hz=None, k=16):
-    for L in lspace:
-        eigs = np.load(f'../lab1/data/sparse_eigs_open_L{L}.npz')
-        evals = eigs['evals']
-        evecs = eigs['evecs']
-        h_idx = 8
+def p4_1(Lspace, sample_L=5, dtspace=None, hx=None, hz=None, k=16):
+    if hx is None:
+        hx = FIELD_VALS['hx']
+    if hz is None:
+        hz = FIELD_VALS['hz']
+    # eigs = dense_eigs(sample_L, hx=hx, hz=hx, note=f'L{sample_L}_hx{hx}_hz{hz}')
+    # gnd_eng = eigs['evals'][0]
 
-        state = np.zeros(2**L)
-        state[-1] = 1
-        # state[0] = 1
-        # state /= np.sqrt(2)
+    h_idx = 8
+    gnd_eng = np.load(f'../lab1/data/sparse_eigs_open_L{sample_L}.npz')['evals'][h_idx, 0]
 
-        # state = evecs[h_idx, :, 0]
+    state = np.zeros(2**sample_L)
+    state[-1] = 1
 
-        mps = MPS.make_from_state(state, 1, L, hx=hx, hz=hz, ortho_center=0)
-
-        energy = []
-        # true_energy = []
-        count = 0
-        for _ in range(N):
-            energy.append(mps.measure_energy())
-            # true_energy.append(np.exp(-2 * dt*count * evals[h_idx, 0]) * evals[h_idx, 0])
+    fig, axes = plt.subplots(figsize=(5, 5))
+    for dt in dtspace:
+        mps = MPS.make_from_state(state, 1, sample_L, hx=hx, hz=hz, ortho_center=0)
+        energy = [mps.measure_energy()]
+        while True:
             mps.evolve(dt, k)
             mps.renormalize()
-            count += 1
+            energy.append(mps.measure_energy())
+            if np.abs((energy[-1] - energy[-2]) / energy[-1]) < 1e-5:
+                break
+        energy = np.array(energy)
+        tspace = np.arange(0, len(energy)*dt, dt)
+        axes.plot(tspace, energy, label=rf'$\delta \tau = {round(dt, 5)}$')
         print(f'final energy: {energy[-1]}')
-        print(f'true energy: {evals[h_idx, 0]}')
+    print(f'true energy: {gnd_eng}')
 
-    energy = np.array(energy)
-    # true_energy = np.array(true_energy)
+    axes.axhline(gnd_eng, label='Ground State Energy', color='black', linestyle='dotted')
+    axes.set_xlabel(r'Imaginary Time $\delta \tau$')
+    axes.set_ylabel('Energy')
 
-    # energy = np.abs(energy)
-    # true_energy = np.abs(true_energy)
-
-    # error = np.abs(energy - true_energy)/true_energy
-
-    plt.figure()
-    tspace = np.arange(0, dt * N, dt)
-    plt.plot(tspace, energy, label='MPS energy')
-    # plt.plot(tspace, true_energy, label='true energy')
-    # plt.plot(error)
-    plt.xlabel('time')
-    plt.ylabel('energy')
-    # plt.yscale('log')
-    plt.savefig(FIG_DIR + 'gnd_energy.png')
-
-    # print('energy:')
-    # print(energy)
-    # print('true energy:')
-    # print(true_energy)
+    fig.legend(**utility.LEGEND_OPTIONS)
+    fig.savefig(FIG_DIR + 'p4_1_gnd_eng_convergence.png', **utility.FIG_SAVE_OPTIONS)
 
 
 if __name__ == '__main__':
-    final_time = 10
-    DT = 0.01
-    num = int(final_time / DT)
-    p4_1(np.arange(5, 6), dt=DT, N=num, k=16, hx=1, hz=0)
+    LSPACE = np.arange(5, 21)
+    DTSPACE = 0.1**np.arange(1, 2)
+    p4_1(LSPACE, dtspace=DTSPACE, hx=1, hz=0)

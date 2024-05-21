@@ -5,6 +5,9 @@ from typing import Literal
 
 cache_type = Literal['npy', 'npz', 'pkl']
 
+LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
+FIG_SAVE_OPTIONS = {'bbox_inches': 'tight'}
+
 
 class PhysicsError(Exception):
     pass
