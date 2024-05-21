@@ -17,7 +17,7 @@ class MPS:
         Creates an MPS given the list of A tensors.
         :param L: System size.
         :param A_list: List of A^j tensors.
-        :param ortho_center:
+        :param ortho_center: Index of orthogonality center.
         """
         self.L = L
         self.A_list = A_list
@@ -102,7 +102,8 @@ class MPS:
 
         W = np.einsum('a,ab->ab', s[:k], Vh[:k])
         if A_counter == L - 1:
-            A_list.append(W[:k].T.reshape(2, 1, min(2, k)))
+            # A_list.append(W[:k].T.reshape(2, 1, min(2, k)))
+            A_list.append(np.stack((W[:, :1], W[:, 1:])))
         else:
             cls.__make_from_state_helper(W, k, A_counter + 1, L, A_list)
 
@@ -197,6 +198,16 @@ class MPS:
             lr = 'right'
         print(f'Site {j} {lr} canonical score: {np.linalg.norm(res - comp)}')
 
+    def norm(self):
+        A = self.A_list[0]
+        A_dag = np.einsum('abc->acb', A).conj()
+        contract = np.einsum('abc,acd->db', A_dag, A)
+        for j in range(1, self.L):
+            A = self.A_list[j]
+            A_dag = np.einsum('abc->acb', A).conj()
+            contract = np.einsum('abc,cd,ade->be', A_dag, contract, A)
+        return np.trace(contract)
+
 
 def p4_1(lspace, dt=0.1, N=10, hx=None, hz=None, k=16):
     for L in lspace:
@@ -205,36 +216,47 @@ def p4_1(lspace, dt=0.1, N=10, hx=None, hz=None, k=16):
         evecs = eigs['evecs']
         h_idx = 8
 
-        state = np.zeros(2**L)
-        state[-1] = 1
+        # state = np.zeros(2**L)
+        # state[-1] = 1
         # state[0] = 1
         # state /= np.sqrt(2)
 
-        # state = evecs[h_idx, :, 0]
+        state = evecs[h_idx, :, 0]
 
-        mps = MPS.make_from_state(state, 2, L, hx=hx, hz=hz, ortho_center=0)
-        for j in range(L):
-            mps.check_canonical(j, left=False)
+        mps = MPS.make_from_state(state, 100, L, hx=hx, hz=hz, ortho_center=0)
 
-
-        # print(f'initial A list:')
-        # for A in mps.A_list:
-        #     print(A)
-        #     print('-'*100)
         energy = []
+        true_energy = []
+        count = 0
         for _ in range(N):
             energy.append(mps.measure_energy())
+            true_energy.append(np.exp(-2 * dt*count * evals[h_idx, 0]) * evals[h_idx, 0])
             mps.evolve(dt, k)
-        print(f'first energy: {energy[0]}')
-        print(f'right energy: {evals[h_idx, 0]}')
+            count += 1
+
+    energy = np.array(energy)
+    true_energy = np.array(true_energy)
+
+    energy = np.abs(energy)
+    true_energy = np.abs(true_energy)
+
+    error = np.abs(energy - true_energy)/true_energy
 
     plt.figure()
     tspace = np.arange(0, dt * N, dt)
-    plt.plot(tspace, energy)
+    # plt.plot(tspace, energy, label='MPS energy')
+    # plt.plot(tspace, true_energy, label='true energy')
+    plt.plot(error)
     plt.xlabel('time')
     plt.ylabel('energy')
+    # plt.yscale('log')
     plt.savefig(FIG_DIR + 'gnd_energy.png')
+
+    print('energy:')
+    print(energy)
+    print('true energy:')
+    print(true_energy)
 
 
 if __name__ == '__main__':
-    p4_1(np.arange(5, 6), hx=1, hz=0)
+    p4_1(np.arange(5, 6), k=16, hx=1, hz=0)
