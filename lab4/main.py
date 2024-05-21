@@ -57,7 +57,7 @@ class MPS:
         if left:
             U *= s
         else:
-            Vh = np.einsum('a,ab->ab', s, Vh)
+            Vh = s[:, np.newaxis] * Vh
         split_idx = Vh.shape[1] // 2
         return np.stack((U[::2], U[1::2])), np.stack((Vh[:, :split_idx], Vh[:, split_idx:]))
 
@@ -100,9 +100,8 @@ class MPS:
         A = np.stack((U[::2, :k], U[1::2, :k]))
         A_list.append(A)
 
-        W = np.einsum('a,ab->ab', s[:k], Vh[:k])
+        W = s[:k, np.newaxis] * Vh[:k]
         if A_counter == L - 1:
-            # A_list.append(W[:k].T.reshape(2, 1, min(2, k)))
             A_list.append(np.stack((W[:, :1], W[:, 1:])))
         else:
             cls.__make_from_state_helper(W, k, A_counter + 1, L, A_list)
@@ -119,7 +118,7 @@ class MPS:
         n_dot_sigma = self.field_op / mag
         field = np.cosh(phi) * np.identity(2) - np.sinh(phi) * n_dot_sigma
         for idx, A in enumerate(self.A_list):
-            self.A_list[idx] = np.einsum('ab,bcd->acd', field, A)
+            self.A_list[idx] = np.tensordot(field, A, axes=([1], [0]))
 
     def __apply_two_site(self, dt, parity):
         exp_xor = np.exp(-1 * dt * self.xor)
@@ -169,14 +168,14 @@ class MPS:
         for j in range(self.L):
             # Compute the field energy
             A = self.A_list[j]
-            A_dag = np.einsum('abc->acb', A).conj()
+            A_dag = np.transpose(A, axes=(0, 2, 1)).conj()
             traces = np.einsum('abc,dcb->ad', A_dag, A)
             energy += np.sum(self.field_op * traces)
 
             if j != self.L-1:
                 # Compute the two-site energy
                 next_A = self.A_list[j+1]
-                next_A_dag = np.einsum('abc->acb', next_A).conj()
+                next_A_dag = np.transpose(next_A, axes=(0, 2, 1)).conj()
                 traces = np.einsum('abc,dce,def,afb->ad', next_A_dag, A_dag, A, next_A)
                 energy += np.sum(self.xor * traces)
 
@@ -184,27 +183,13 @@ class MPS:
                 self.shift_ortho_center(left=False)
         return energy
 
-    def check_canonical(self, j, left=True):
-        A = self.A_list[j]
-        A_dag = np.einsum('abc->acb', A).conj()
-        if left:
-            res = np.einsum('abc,acd->bd', A_dag, A)
-        else:
-            res = np.einsum('abc,acd->bd', A, A_dag)
-        comp = np.identity(res.shape[0])
-        if left:
-            lr = 'left'
-        else:
-            lr = 'right'
-        print(f'Site {j} {lr} canonical score: {np.linalg.norm(res - comp)}')
-
     def norm(self):
         A = self.A_list[0]
-        A_dag = np.einsum('abc->acb', A).conj()
-        contract = np.einsum('abc,acd->db', A_dag, A)
+        A_dag = np.transpose(A, axes=(0, 2, 1)).conj()
+        contract = np.einsum('abc,acd->bd', A_dag, A)
         for j in range(1, self.L):
             A = self.A_list[j]
-            A_dag = np.einsum('abc->acb', A).conj()
+            A_dag = np.transpose(A, axes=(0, 2, 1)).conj()
             contract = np.einsum('abc,cd,ade->be', A_dag, contract, A)
         return np.trace(contract)
 
