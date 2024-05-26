@@ -7,7 +7,7 @@ FIG_DIR = './figs/'
 CACHE_DIR = './data/'
 
 FIELD_VALS = {'hx': -1.05, 'hz': 0.5}
-TOL = 1e-5
+TOL = 1e-10
 
 
 @utility.cache('npy', CACHE_DIR + 'l4_dense_H')
@@ -169,10 +169,7 @@ class MPS:
 
     def __restore_canonical(self, k):
         self.ortho_center = 0
-        # First, we sweep left -> right to right without truncating
         self.sweep(k=None, left=False)
-        # Second, we sweep right -> left to left with truncating
-        self.sweep(k=k, left=True)
 
     def shift_ortho_center(self, k=None, left=True):
         if left:
@@ -206,38 +203,53 @@ class MPS:
         self.__apply_two_site(dt, 1)
         self.__restore_canonical(k)
 
-    def measure_energy(self):
-        assert self.ortho_center == 0
+    def measure_energy(self, k=None):
+        assert self.ortho_center == 0 or self.ortho_center == self.L - 1
+        left = self.ortho_center == self.L - 1
+        measure_order = np.arange(self.L)
+        if left:
+            measure_order = measure_order[::-1]
+
         energy = 0
-        for j in range(self.L):
+        for j in measure_order:
             # Compute the field energy
             A = self.A_list[j]
             A_dag = np.transpose(A, axes=(0, 2, 1)).conj()
             traces = np.einsum('abc,dcb->ad', A_dag, A)
             energy += np.sum(self.field_op * traces)
 
-            if j != self.L-1:
-                # Compute the two-site energy
+            if left and j == 0:
+                break
+            if (not left) and j == self.L - 1:
+                break
+
+            # Compute the two-site energy
+            if left:
+                next_A = A
+                next_A_dag = A_dag
+                A = self.A_list[j-1]
+                A_dag = np.transpose(A, axes=(0, 2, 1)).conj()
+            else:
                 next_A = self.A_list[j+1]
                 next_A_dag = np.transpose(next_A, axes=(0, 2, 1)).conj()
 
-                A_prod = np.einsum('abc,ace->abe', A_dag, A)
-                next_A_prod = np.einsum('abc,ace->abe', next_A, next_A_dag)
+            A_prod = np.einsum('abc,ace->abe', A_dag, A)
+            next_A_prod = np.einsum('abc,ace->abe', next_A, next_A_dag)
 
-                for k in range(2):
-                    for l in range(2):
-                        energy += self.xor[k, l] * np.einsum('ab,ba->', next_A_prod[k], A_prod[l])
+            for next_idx in range(2):
+                for idx in range(2):
+                    energy += self.xor[next_idx, idx] * np.einsum('ab,ba->', next_A_prod[next_idx], A_prod[idx])
 
-                # Move the orthogonality center to site j+1
-                self.shift_ortho_center(left=False)
+            # Move the orthogonality center to the next site:
+            self.shift_ortho_center(left=left, k=k)
         return energy
 
     def cool(self, dt, k):
-        energy = [self.measure_energy()]
+        energy = [self.measure_energy(k=k)]
         while True:
             self.evolve(dt, k)
             self.renormalize()
-            energy.append(self.measure_energy())
+            energy.append(self.measure_energy(k=k))
             if np.abs((energy[-1] - energy[-2]) / energy[-1]) < TOL:
                 break
         energy = np.array(energy)
@@ -294,10 +306,10 @@ def p4_1_fix_dt(Lspace, dt=0.01, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz'])
 
 
 if __name__ == '__main__':
-    DTSPACE = 0.1**np.arange(1, 4)
+    DTSPACE = 0.1**np.arange(1, 3)
     LSPACE = np.arange(32, 256, 10)
     # LSPACE = np.arange(12, 15)
 
-    # p4_1_fix_L(DTSPACE)
+    p4_1_fix_L(DTSPACE)
 
-    p4_1_fix_dt(LSPACE, dt=0.1)
+    # p4_1_fix_dt(LSPACE, dt=0.1)
