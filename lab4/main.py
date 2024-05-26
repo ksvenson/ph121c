@@ -3,11 +3,29 @@ import scipy as sp
 import matplotlib.pyplot as plt
 import utility
 
+import time
+
 FIG_DIR = './figs/'
 CACHE_DIR = './data/'
 
 FIELD_VALS = {'hx': -1.05, 'hz': 0.5}
-TOL = 1e-10
+TOL = 1e-2
+
+
+test_hx = FIELD_VALS['hx']
+test_hz = FIELD_VALS['hz']
+test_dt = 0.01
+test_k = 16
+def measure(L):
+    mps = MPS.make_initial_state(L, test_hx, test_hz)
+    mps.evolve(test_dt, test_k)
+    mps.renormalize()
+    mps.measure_energy(k=test_k)
+
+def test_cool(L):
+    mps = MPS.make_initial_state(L, test_hx, test_hz)
+    return mps.cool(test_dt, test_k)
+
 
 
 @utility.cache('npy', CACHE_DIR + 'l4_dense_H')
@@ -165,11 +183,13 @@ class MPS:
             W = np.einsum('abc,dce->adbe', self.A_list[j], self.A_list[j+1])
             # multiply by the 2-site operator
             W = np.einsum('ab,abcd->abcd', exp_xor, W)
+            # W = np.einsum('ab,abcd->bcad', exp_xor, W)
             self.A_list[j], self.A_list[j+1] = self.__class__.__svd_W(W, left=False)
 
     def __restore_canonical(self, k):
         self.ortho_center = 0
         self.sweep(k=None, left=False)
+        # self.sweep(k=k, left=True)
 
     def shift_ortho_center(self, k=None, left=True):
         if left:
@@ -182,6 +202,7 @@ class MPS:
             r_idx = self.ortho_center + 1
 
         W = np.einsum('abc,dce->adbe', self.A_list[l_idx], self.A_list[r_idx])
+        # W = np.einsum('abc,dce->dbae', self.A_list[l_idx], self.A_list[r_idx])
         self.A_list[l_idx], self.A_list[r_idx] = self.__class__.__svd_W(W, k=k, left=left)
 
         if left:
@@ -246,14 +267,24 @@ class MPS:
 
     def cool(self, dt, k):
         energy = [self.measure_energy(k=k)]
+        runtime = []
         while True:
+            start = time.time()
+            for A in self.A_list:
+                assert max(A.shape) <= k
             self.evolve(dt, k)
             self.renormalize()
             energy.append(self.measure_energy(k=k))
+
+            runtime.append(time.time() - start)
+
             if np.abs((energy[-1] - energy[-2]) / energy[-1]) < TOL:
                 break
         energy = np.array(energy)
-        return energy
+
+        plt.plot(runtime, label=self.L)
+
+        return energy, np.mean(runtime)
 
 
 def p4_1_fix_L(dtspace, L=12, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz']):
@@ -310,6 +341,19 @@ if __name__ == '__main__':
     LSPACE = np.arange(32, 256, 10)
     # LSPACE = np.arange(12, 15)
 
-    p4_1_fix_L(DTSPACE)
+    # p4_1_fix_L(DTSPACE)
 
-    # p4_1_fix_dt(LSPACE, dt=0.1)
+    # p4_1_fix_dt(LSPACE)
+
+    plt.figure()
+    mean_runtime_list = []
+    for L in np.arange(5, 50, 5):
+        print(L)
+        energy, mean_runtime = test_cool(L)
+        mean_runtime_list.append(mean_runtime)
+    plt.legend()
+
+    plt.figure()
+    plt.plot(np.arange(5, 50, 5), mean_runtime_list)
+
+    plt.show()
