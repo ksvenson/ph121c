@@ -238,7 +238,7 @@ class MPS:
             self.evolve(dt, k)
             self.renormalize()
             energy.append(self.measure_energy())
-            if np.abs((energy[-1] - energy[-2]) / dt) < TOL:
+            if np.abs((energy[-1] - energy[-2]) / energy[-1]) < TOL:
                 break
         energy = np.array(energy)
         return energy
@@ -257,7 +257,7 @@ def p4_1_fix_L(dtspace, L=12, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz']):
         mps = MPS.make_initial_state(L, hx, hz)
         energy = mps.cool(dt, k)
 
-        tspace = np.arange(0, len(energy)*dt, dt)
+        tspace = dt * np.arange(0, len(energy))
         axes.plot(tspace, energy, label=rf'$\delta \tau = {round(dt, 5)}$')
         print(f'final energy: {energy[-1]}')
     print(f'true energy: {gnd_eng}')
@@ -294,10 +294,10 @@ def p4_1_fix_dt(Lspace, dt=0.01, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz'])
 
 
 if __name__ == '__main__':
-    DTSPACE = 0.1**np.arange(1, 3)
-    # LSPACE = np.arange(32, 256, 10)
-    LSPACE = np.arange(12, 15)
+    DTSPACE = 0.1**np.arange(1, 4)
+    LSPACE = np.arange(32, 256, 10)
+    # LSPACE = np.arange(12, 15)
 
-    p4_1_fix_L(DTSPACE)
+    # p4_1_fix_L(DTSPACE)
 
-    # p4_1_fix_dt(LSPACE)
+    p4_1_fix_dt(LSPACE, dt=0.1)
