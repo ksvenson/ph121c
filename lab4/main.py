@@ -7,14 +7,11 @@ FIG_DIR = './figs/'
 CACHE_DIR = './data/'
 
 FIELD_VALS = {'hx': -1.05, 'hz': 0.5}
+TOL = 1e-5
 
 
 @utility.cache('npy', CACHE_DIR + 'l4_dense_H')
-def make_dense_H(L, hx=None, hz=None, note=None):
-    if hx is None:
-        hx = FIELD_VALS['hx']
-    if hz is None:
-        hz = FIELD_VALS['hz']
+def make_dense_H(L, hx, hz, note=None):
     H = np.zeros((2**L, 2**L))
     for i in range(2**L):
         # Perform a XOR between states, and states shifted by 1 bit. Make sure that the first bit is zero.
@@ -30,9 +27,9 @@ def make_dense_H(L, hx=None, hz=None, note=None):
 
 
 @utility.cache('npz', CACHE_DIR + 'l4_dense_eigs')
-def dense_eigs(L, hx=None, hz=None, note=None):
+def dense_eigs(L, hx, hz, note=None):
     print(f'finding dense evals: L={L}')
-    H = make_dense_H(L, hx=hx, hz=hz, note=note)
+    H = make_dense_H(L, hx, hz, note=note)
     evals, evecs = sp.linalg.eigh(H)
     return {'evals': evals, 'evecs': evecs}
 
@@ -41,7 +38,7 @@ class MPS:
     """
     Represents an MPS state.
     """
-    def __init__(self, L, A_list, ortho_center, hx=None, hz=None):
+    def __init__(self, L, A_list, ortho_center, hx, hz):
         """
         Creates an MPS given the list of A tensors.
         :param L: System size.
@@ -51,14 +48,8 @@ class MPS:
         self.L = L
         self.A_list = A_list
         self.ortho_center = ortho_center
-        if hx is None:
-            self.hx = FIELD_VALS['hx']
-        else:
-            self.hx = hx
-        if hz is None:
-            self.hz = FIELD_VALS['hz']
-        else:
-            self.hz = hz
+        self.hx = hx
+        self.hz = hz
 
         # Slightly modified matrix from Equation 20.
         # This is because we work in a basis were the zero index corresponds to spin down.
@@ -91,7 +82,7 @@ class MPS:
         return np.stack((U[::2], U[1::2])), np.stack((Vh[:, :split_idx], Vh[:, split_idx:]))
 
     @classmethod
-    def make_from_state(cls, state, k, L, hx=None, hz=None, ortho_center=None):
+    def make_from_state(cls, state, L, k, hx, hz, ortho_center=None):
         """
         Returns an MPS representing `state` in the sigma z basis.
         :param state: State in the sigma z basis.
@@ -135,11 +126,29 @@ class MPS:
         else:
             cls.__make_from_state_helper(W, k, A_counter + 1, L, A_list)
 
-    def evolve(self, dt, k):
-        self.__apply_field(dt)
-        self.__apply_two_site(dt, 0)
-        self.__apply_two_site(dt, 1)
-        self.__restore_canonical(k)
+    @classmethod
+    def make_initial_state(cls, L, hx, hz, neel=False):
+        A_list = []
+        for i in range(L):
+            if neel and i % 2 == 1:
+                A_list.append(np.arange(2)[::-1].reshape(2, 1, 1))
+            else:
+                A_list.append(np.arange(2).reshape(2, 1, 1))
+        return cls(L, A_list, 0, hx, hz)
+
+    def norm(self):
+        A = self.A_list[0]
+        A_dag = np.transpose(A, axes=(0, 2, 1)).conj()
+        contract = np.einsum('abc,acd->bd', A_dag, A)
+        for j in range(1, self.L):
+            A = self.A_list[j]
+            A_dag = np.transpose(A, axes=(0, 2, 1)).conj()
+            contract = np.einsum('abc,cd,ade->be', A_dag, contract, A)
+        return np.trace(contract)
+
+    def renormalize(self):
+        # We renormalize at the orthogonality center so that we maintain the canonical form
+        self.A_list[self.ortho_center] /= np.sqrt(self.norm())
 
     def __apply_field(self, dt):
         mag = np.sqrt(self.hx**2 + self.hz**2)
@@ -191,6 +200,12 @@ class MPS:
         for _ in range(self.L-1):
             self.shift_ortho_center(k=k, left=left)
 
+    def evolve(self, dt, k):
+        self.__apply_field(dt)
+        self.__apply_two_site(dt, 0)
+        self.__apply_two_site(dt, 1)
+        self.__restore_canonical(k)
+
     def measure_energy(self):
         assert self.ortho_center == 0
         energy = 0
@@ -205,53 +220,43 @@ class MPS:
                 # Compute the two-site energy
                 next_A = self.A_list[j+1]
                 next_A_dag = np.transpose(next_A, axes=(0, 2, 1)).conj()
-                traces = np.einsum('abc,dce,def,afb->ad', next_A_dag, A_dag, A, next_A)
-                energy += np.sum(self.xor * traces)
+
+                A_prod = np.einsum('abc,ace->abe', A_dag, A)
+                next_A_prod = np.einsum('abc,ace->abe', next_A, next_A_dag)
+
+                for k in range(2):
+                    for l in range(2):
+                        energy += self.xor[k, l] * np.einsum('ab,ba->', next_A_prod[k], A_prod[l])
 
                 # Move the orthogonality center to site j+1
                 self.shift_ortho_center(left=False)
         return energy
 
-    def norm(self):
-        A = self.A_list[0]
-        A_dag = np.transpose(A, axes=(0, 2, 1)).conj()
-        contract = np.einsum('abc,acd->bd', A_dag, A)
-        for j in range(1, self.L):
-            A = self.A_list[j]
-            A_dag = np.transpose(A, axes=(0, 2, 1)).conj()
-            contract = np.einsum('abc,cd,ade->be', A_dag, contract, A)
-        return np.trace(contract)
-
-    def renormalize(self):
-        # We renormalize at the orthogonality center so that we maintain the canonical form
-        self.A_list[self.ortho_center] /= np.sqrt(self.norm())
+    def cool(self, dt, k):
+        energy = [self.measure_energy()]
+        while True:
+            self.evolve(dt, k)
+            self.renormalize()
+            energy.append(self.measure_energy())
+            if np.abs((energy[-1] - energy[-2]) / dt) < TOL:
+                break
+        energy = np.array(energy)
+        return energy
 
 
-def p4_1(Lspace, sample_L=5, dtspace=None, hx=None, hz=None, k=16):
-    if hx is None:
-        hx = FIELD_VALS['hx']
-    if hz is None:
-        hz = FIELD_VALS['hz']
-    # eigs = dense_eigs(sample_L, hx=hx, hz=hx, note=f'L{sample_L}_hx{hx}_hz{hz}')
-    # gnd_eng = eigs['evals'][0]
+def p4_1_fix_L(dtspace, L=12, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz']):
+    eigs = dense_eigs(L, hx, hz, note=f'L{L}_hx{hx}_hz{hz}')
+    gnd_eng = eigs['evals'][0]
 
-    h_idx = 8
-    gnd_eng = np.load(f'../lab1/data/sparse_eigs_open_L{sample_L}.npz')['evals'][h_idx, 0]
-
-    state = np.zeros(2**sample_L)
+    state = np.zeros(2**L)
     state[-1] = 1
 
     fig, axes = plt.subplots(figsize=(5, 5))
     for dt in dtspace:
-        mps = MPS.make_from_state(state, 1, sample_L, hx=hx, hz=hz, ortho_center=0)
-        energy = [mps.measure_energy()]
-        while True:
-            mps.evolve(dt, k)
-            mps.renormalize()
-            energy.append(mps.measure_energy())
-            if np.abs((energy[-1] - energy[-2]) / energy[-1]) < 1e-5:
-                break
-        energy = np.array(energy)
+        print(f'dt: {round(dt, 5)}')
+        mps = MPS.make_initial_state(L, hx, hz)
+        energy = mps.cool(dt, k)
+
         tspace = np.arange(0, len(energy)*dt, dt)
         axes.plot(tspace, energy, label=rf'$\delta \tau = {round(dt, 5)}$')
         print(f'final energy: {energy[-1]}')
@@ -265,7 +270,34 @@ def p4_1(Lspace, sample_L=5, dtspace=None, hx=None, hz=None, k=16):
     fig.savefig(FIG_DIR + 'p4_1_gnd_eng_convergence.png', **utility.FIG_SAVE_OPTIONS)
 
 
+def p4_1_fix_dt(Lspace, dt=0.01, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz']):
+    fig, axes = plt.subplots(figsize=(5, 5))
+    gnd_eng = []
+    for L in Lspace:
+        print(f'L: {L}')
+        mps = MPS.make_initial_state(L, hx, hz)
+        gnd_eng.append(mps.cool(dt, k)[-1])
+    gnd_eng = np.array(gnd_eng)
+
+    bulk_eng = []
+    for i in range(len(Lspace) - 1):
+        bulk_eng.append((gnd_eng[i + 1] - gnd_eng[i]) / (Lspace[i+1] - Lspace[i]))
+    bulk_eng = np.array(bulk_eng)
+
+    L_step = Lspace[1] - Lspace[0]
+    axes.plot(Lspace, gnd_eng / Lspace, label=r'$E_0(L)$')
+    axes.plot(Lspace[:-1], bulk_eng, label=rf'$(E_0(L + {L_step}) - E_0(L)) / {L_step}$')
+    axes.set_xlabel(r'$L$')
+    axes.set_ylabel('Energy per Site')
+    fig.legend(**utility.LEGEND_OPTIONS)
+    fig.savefig(FIG_DIR + 'p4_1_L_infty.png', **utility.FIG_SAVE_OPTIONS)
+
+
 if __name__ == '__main__':
-    LSPACE = np.arange(5, 21)
-    DTSPACE = 0.1**np.arange(1, 2)
-    p4_1(LSPACE, dtspace=DTSPACE, hx=1, hz=0)
+    DTSPACE = 0.1**np.arange(1, 3)
+    # LSPACE = np.arange(32, 256, 10)
+    LSPACE = np.arange(12, 15)
+
+    p4_1_fix_L(DTSPACE)
+
+    # p4_1_fix_dt(LSPACE)
