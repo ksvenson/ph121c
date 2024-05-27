@@ -2,12 +2,13 @@ import numpy as np
 import scipy as sp
 import matplotlib.pyplot as plt
 import utility
+import os
 
 FIG_DIR = './figs/'
 CACHE_DIR = './data/'
 
 FIELD_VALS = {'hx': -1.05, 'hz': 0.5}
-TOL = 1e-10
+TOL = 1e-2
 
 
 @utility.cache('npy', CACHE_DIR + 'l4_dense_H')
@@ -136,6 +137,26 @@ class MPS:
                 A_list.append(np.arange(2).reshape(2, 1, 1))
         return cls(L, A_list, 0, hx, hz)
 
+    @classmethod
+    def load(cls, note):
+        data = np.load(CACHE_DIR + note + '.npz')
+        meta = data['meta']
+        L = meta[0]
+        ortho_center = meta[1]
+        hx = meta[2]
+        hz = meta[3]
+        A_list = []
+        for idx in range(L):
+            A_list.append(data[idx])
+        return cls(L, A_list, ortho_center, hx, hz)
+
+    def save(self, note):
+        meta = [self.L, self.ortho_center, self.hx, self.hz]
+        data = {'meta': meta}
+        for idx, A in enumerate(self.A_list):
+            data[idx] = A
+        np.savez(CACHE_DIR + note + '.npz')
+
     def norm(self):
         A = self.A_list[0]
         A_dag = np.transpose(A, axes=(0, 2, 1)).conj()
@@ -233,8 +254,8 @@ class MPS:
                 next_A = self.A_list[j+1]
                 next_A_dag = np.transpose(next_A, axes=(0, 2, 1)).conj()
 
-            A_prod = np.einsum('abc,ace->abe', A_dag, A)
-            next_A_prod = np.einsum('abc,ace->abe', next_A, next_A_dag)
+            A_prod = np.einsum('abc,acd->abd', A_dag, A)
+            next_A_prod = np.einsum('abc,acd->abd', next_A, next_A_dag)
 
             for next_idx in range(2):
                 for idx in range(2):
@@ -255,13 +276,28 @@ class MPS:
         energy = np.array(energy)
         return energy
 
+    def correlation(self):
+        assert self.ortho_center == 0
+
+        A = self.A_list[0]
+        A_dag = np.transpose(A, axes=(0, 2, 1)).conj()
+        A_prod = np.einsum('abc,acd->abd', A_dag, A)
+        correl = []
+        for r in range(self.L):
+            A_r = self.A_list[r]
+            A_r_dag = np.transpose(A_r, axes=(0, 2, 1)).conj()
+            A_r_prod = np.einsum('abc,acd->abd', A_r, A_r_dag)
+
+            correl.append(0)
+            for r_idx in range(2):
+                for idx in range(2):
+                    correl[-1] += -1 * self.xor[r_idx, idx] * np.einsum('ab,ba->', A_r_prod[r_idx], A_prod[idx])
+        return correl
+
 
 def p4_1_fix_L(dtspace, L=12, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz']):
     eigs = dense_eigs(L, hx, hz, note=f'L{L}_hx{hx}_hz{hz}')
     gnd_eng = eigs['evals'][0]
-
-    state = np.zeros(2**L)
-    state[-1] = 1
 
     fig, axes = plt.subplots(figsize=(5, 5))
     for dt in dtspace:
@@ -283,12 +319,16 @@ def p4_1_fix_L(dtspace, L=12, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz']):
 
 
 def p4_1_fix_dt(Lspace, dt=0.01, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz']):
-    fig, axes = plt.subplots(figsize=(5, 5))
+    correl_Lspace = Lspace[-5:]
+
     gnd_eng = []
+    correl = []
     for L in Lspace:
         print(f'L: {L}')
         mps = MPS.make_initial_state(L, hx, hz)
         gnd_eng.append(mps.cool(dt, k)[-1])
+        if L in correl_Lspace:
+            correl.append(mps.correlation())
     gnd_eng = np.array(gnd_eng)
 
     bulk_eng = []
@@ -297,6 +337,7 @@ def p4_1_fix_dt(Lspace, dt=0.01, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz'])
     bulk_eng = np.array(bulk_eng)
 
     L_step = Lspace[1] - Lspace[0]
+    fig, axes = plt.subplots(figsize=(5, 5))
     axes.plot(Lspace, gnd_eng / Lspace, label=r'$E_0(L)$')
     axes.plot(Lspace[:-1], bulk_eng, label=rf'$(E_0(L + {L_step}) - E_0(L)) / {L_step}$')
     axes.set_xlabel(r'$L$')
@@ -304,12 +345,19 @@ def p4_1_fix_dt(Lspace, dt=0.01, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz'])
     fig.legend(**utility.LEGEND_OPTIONS)
     fig.savefig(FIG_DIR + 'p4_1_L_infty.png', **utility.FIG_SAVE_OPTIONS)
 
+    fig, axes = plt.subplots(figsize=(5, 5))
+    for idx, L in enumerate(correl_Lspace):
+        axes.plot(np.arange(L), correl[idx], label=rf'$L={L}$')
+    axes.set_xlabel(r'$r$')
+    axes.set_ylabel(r'$\langle \sigma_1^z \sigma_{1+r}^z \rangle$')
+    fig.legend(**utility.LEGEND_OPTIONS)
+    fig.savefig(FIG_DIR + 'p4_1_correl.png', **utility.FIG_SAVE_OPTIONS)
+
 
 if __name__ == '__main__':
     DTSPACE = 0.1**np.arange(1, 3)
-    LSPACE = np.arange(32, 256, 10)
-    # LSPACE = np.arange(12, 15)
+    LSPACE = np.arange(10, 250, 10)[:5]
 
-    p4_1_fix_L(DTSPACE)
+    # p4_1_fix_L(DTSPACE)
 
-    # p4_1_fix_dt(LSPACE, dt=0.1)
+    p4_1_fix_dt(LSPACE, k=8)
