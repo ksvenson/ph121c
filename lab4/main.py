@@ -2,13 +2,12 @@ import numpy as np
 import scipy as sp
 import matplotlib.pyplot as plt
 import utility
-import os
 
 FIG_DIR = './figs/'
 CACHE_DIR = './data/'
 
 FIELD_VALS = {'hx': -1.05, 'hz': 0.5}
-TOL = 1e-2
+TOL = 1e-10
 
 
 @utility.cache('npy', CACHE_DIR + 'l4_dense_H')
@@ -279,19 +278,18 @@ class MPS:
     def correlation(self):
         assert self.ortho_center == 0
 
-        A = self.A_list[0]
-        A_dag = np.transpose(A, axes=(0, 2, 1)).conj()
-        A_prod = np.einsum('abc,acd->abd', A_dag, A)
-        correl = []
-        for r in range(self.L):
+        sig_A_dag = np.transpose(self.A_list[0], axes=(0, 2, 1)).conj()
+        # Applying the sigma_z operator:
+        sig_A_dag[0] *= -1
+        contract = np.einsum('abc,acd->bd', sig_A_dag, self.A_list[0])
+        correl = [np.trace(contract)]
+        for r in range(1, self.L):
             A_r = self.A_list[r]
             A_r_dag = np.transpose(A_r, axes=(0, 2, 1)).conj()
-            A_r_prod = np.einsum('abc,acd->abd', A_r, A_r_dag)
 
-            correl.append(0)
-            for r_idx in range(2):
-                for idx in range(2):
-                    correl[-1] += -1 * self.xor[r_idx, idx] * np.einsum('ab,ba->', A_r_prod[r_idx], A_prod[idx])
+            contract = np.einsum('abc,cd,ade->abe', A_r_dag, contract, A_r)
+            correl.append(np.sum(np.diag(-1 * contract[0]) + np.diag(contract[1])))
+            contract = np.sum(contract, axis=0)
         return correl
 
 
