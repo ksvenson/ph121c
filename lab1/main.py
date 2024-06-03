@@ -126,6 +126,10 @@ def fit(h, a, hc, nu):
     return a * np.abs(h - hc)**nu
 
 
+def exp_fit(x, a, b):
+    return a * np.exp(-1 * b * x)
+
+
 def p4_1(Lspace=LSPACE):
     plt.figure()
     for C, L in enumerate(Lspace):
@@ -299,6 +303,7 @@ def p4_7(Lspace=LSPACE):
     splitting = []
     color = 0
     for L in Lspace:
+        print(f'L: {L}')
         H = make_sparse_H_sx(L, hspace=HSPACE, note=f'L{L}')
         eigs = sparse_eigs_sx(H, note=f'L{L}')
         evals = eigs['evals']
@@ -322,13 +327,22 @@ def p4_7(Lspace=LSPACE):
     fig.legend(handles, labels, **LEGEND_OPTIONS)
     fig.savefig(FIGS_DIR + f'p4_7_evals_sx.png', bbox_inches='tight')
 
-    plt.figure()
-    plt.plot(Lspace, splitting)
-    plt.title('Ferromagnet' + rf': $h/J={HSPACE[h]}$')
-    plt.xlabel(r'$L$')
-    plt.ylabel(f'$(E_1 - E_0)/J$')
-    plt.yscale('log')
-    plt.savefig(FIGS_DIR + f'p4_7_splitting_sx.png', bbox_inches='tight')
+    fig, axes = plt.subplots(figsize=(5, 5))
+    axes.plot(Lspace, splitting, label='$E_1 - E_0$')
+
+    popt, pcov = sp.optimize.curve_fit(exp_fit, Lspace, splitting, p0=(1, 1))
+    std = np.sqrt(np.diag(pcov))
+    with open('p4_7_fit_results.txt', 'w') as f:
+        print(f'a: {popt[0]} \pm {std[0]}', file=f)
+        print(f'hc: {popt[1]} \pm {std[1]}', file=f)
+    axes.plot(Lspace, exp_fit(Lspace, *popt), label=r'$a \exp(-bL)$ Fit')
+
+    axes.set_title('Ferromagnet' + rf': $h/J={HSPACE[h]}$')
+    axes.set_xlabel(r'$L$')
+    axes.set_ylabel(f'Gap ($J$)')
+    axes.set_yscale('log')
+    fig.legend(**LEGEND_OPTIONS)
+    fig.savefig(FIGS_DIR + f'p4_7_splitting_sx.png', bbox_inches='tight')
 
 
 if __name__ == '__main__':
