@@ -7,7 +7,7 @@ FIG_DIR = './figs/'
 CACHE_DIR = './data/'
 
 FIELD_VALS = {'hx': -1.05, 'hz': 0.5}
-TOL = 1e-10
+TOL = 1e-1
 
 
 @utility.cache('npy', CACHE_DIR + 'l4_dense_H')
@@ -65,7 +65,7 @@ class MPS:
         ])
 
     @staticmethod
-    def __svd_W(W, k=None, left=True):
+    def __svd_W(W, k=None, left=True, return_s=False):
         W = np.moveaxis(W, (0, 1, 2, 3), (1, 2, 0, 3))
         W = W.reshape(W.shape[0] * W.shape[1], W.shape[2] * W.shape[3])
 
@@ -74,6 +74,8 @@ class MPS:
             U = U[:, :k]
             s = s[:k]
             Vh = Vh[:k]
+        if return_s:
+            return s
         if left:
             U *= s
         else:
@@ -98,8 +100,9 @@ class MPS:
         cls.__make_from_state_helper(W, k, 1, L, A_list)
         mps = cls(L, A_list, L-1, hx, hz)
         if ortho_center is not None:
-            for _ in range(L - ortho_center - 1):
-                mps.shift_ortho_center(k=k, left=True)
+            mps.move_ortho_center(ortho_center)
+            # for _ in range(L - ortho_center - 1):
+            #     mps.shift_ortho_center(k=k, left=True)
         return mps
 
     @classmethod
@@ -127,13 +130,18 @@ class MPS:
             cls.__make_from_state_helper(W, k, A_counter + 1, L, A_list)
 
     @classmethod
-    def make_initial_state(cls, L, hx, hz, neel=False):
+    def make_isotropic_state(cls, L, state, hx, hz):
+        A_list = [state.reshape(2, 1, 1) for _ in range(L)]
+        return cls(L, A_list, 0, hx, hz)
+
+    @classmethod
+    def make_neel_state(cls, L, hx, hz):
         A_list = []
         for i in range(L):
-            if neel and i % 2 == 1:
-                A_list.append(np.arange(2)[::-1].reshape(2, 1, 1))
+            if i % 2 == 0:
+                A_list.append(np.array([0, 1]).reshape(2, 1, 1))
             else:
-                A_list.append(np.arange(2).reshape(2, 1, 1))
+                A_list.append(np.array([1, 0]).reshape(2, 1, 1))
         return cls(L, A_list, 0, hx, hz)
 
     @classmethod
@@ -187,9 +195,10 @@ class MPS:
             W = np.einsum('ab,abcd->abcd', exp_xor, W)
             self.A_list[j], self.A_list[j+1] = self.__class__.__svd_W(W, left=False)
 
-    def __restore_canonical(self, k):
+    def __restore_canonical(self):
         self.ortho_center = 0
-        self.sweep(k=None, left=False)
+        # self.sweep(k=None, left=False)
+        self.move_ortho_center(self.L-1, k=None)
 
     def shift_ortho_center(self, k=None, left=True):
         if left:
@@ -209,6 +218,13 @@ class MPS:
         else:
             self.ortho_center += 1
 
+    def move_ortho_center(self, idx, k=None):
+        distance = idx - self.ortho_center
+        if distance != 0:
+            left = distance < 0
+            for _ in range(np.abs(distance)):
+                self.shift_ortho_center(k=k, left=left)
+
     def sweep(self, k=None, left=True):
         if left:
             assert self.ortho_center == self.L-1
@@ -217,11 +233,11 @@ class MPS:
         for _ in range(self.L-1):
             self.shift_ortho_center(k=k, left=left)
 
-    def evolve(self, dt, k):
+    def imag_evolve(self, dt):
         self.__apply_field(dt)
         self.__apply_two_site(dt, 0)
         self.__apply_two_site(dt, 1)
-        self.__restore_canonical(k)
+        self.__restore_canonical()
 
     def measure_energy(self, k=None):
         assert self.ortho_center == 0 or self.ortho_center == self.L - 1
@@ -261,16 +277,19 @@ class MPS:
                     energy += self.xor[next_idx, idx] * np.einsum('ab,ba->', next_A_prod[next_idx], A_prod[idx])
 
             # Move the orthogonality center to the next site:
-            self.shift_ortho_center(left=left, k=k)
+            self.shift_ortho_center(k=k, left=left)
         return energy
 
     def cool(self, dt, k):
         energy = [self.measure_energy(k=k)]
         while True:
-            self.evolve(dt, k)
+            self.imag_evolve(dt)
             self.renormalize()
             energy.append(self.measure_energy(k=k))
-            if np.abs((energy[-1] - energy[-2]) / energy[-1]) < TOL:
+            # We stop cooling when the slope of the energy density is below `TOL`.
+            check = np.abs((energy[-1] - energy[-2]) / (self.L * dt))
+            print(f'L={self.L} slope: {check}')
+            if check < TOL:
                 break
         energy = np.array(energy)
         return energy
@@ -292,6 +311,60 @@ class MPS:
             contract = np.sum(contract, axis=0)
         return correl
 
+    def real_evolve(self, dt):
+        self.imag_evolve(1j * dt)
+
+    def measure_sig_z(self):
+        A = self.A_list[self.ortho_center]
+        A_dag = np.transpose(A, axes=(0, 2, 1)).conj()
+        # Apply sig_z operator by adding factor of -1
+        A_dag[0] *= -1
+        return np.einsum('abc,acb->', A_dag, A)
+
+    def measure_sig_x(self):
+        A = self.A_list[self.ortho_center]
+        A_dag = np.transpose(A, axes=(0, 2, 1)).conj()
+        # Apply sig_x operator by reversing `A_dag`
+        A_dag = A_dag[::-1]
+        return np.einsum('abc,acb->', A_dag, A)
+
+    def measure_entropy(self):
+        W = np.einsum('abc,dce->adbe', self.A_list[self.ortho_center], self.A_list[self.ortho_center+1])
+        schmidt_vals = self.__class__.__svd_W(W, return_s=True)
+        probs = schmidt_vals**2
+        return -1 * np.sum(probs * np.log(probs))
+
+    def time_trace(self, dt, k, N):
+        data = {
+            'sig_z_1': [],
+            'sig_x_1': [],
+            'sig_z_half': [],
+            'sig_x_half': [],
+            'entropy': []
+        }
+        self.move_ortho_center(0, k=None)
+        data['sig_z_1'].append(self.measure_sig_z())
+        data['sig_x_1'].append(self.measure_sig_x())
+        self.move_ortho_center(self.L // 2, k=None)
+        data['sig_z_half'].append(self.measure_sig_z())
+        data['sig_x_half'].append(self.measure_sig_x())
+        data['entropy'].append(self.measure_entropy())
+
+        for i in range(N):
+            print(f'Time trace step {i} of {N}')
+            self.real_evolve(dt=dt)
+
+            self.move_ortho_center(self.L // 2, k=k)
+            data['sig_z_half'].append(self.measure_sig_z())
+            data['sig_x_half'].append(self.measure_sig_x())
+            data['entropy'].append(self.measure_entropy())
+
+            self.move_ortho_center(0, k=k)
+            data['sig_z_1'].append(self.measure_sig_z())
+            data['sig_x_1'].append(self.measure_sig_x())
+
+        return data
+
 
 def p4_1_fix_L(dtspace, L=12, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz']):
     eigs = dense_eigs(L, hx, hz, note=f'L{L}_hx{hx}_hz{hz}')
@@ -300,7 +373,7 @@ def p4_1_fix_L(dtspace, L=12, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz']):
     fig, axes = plt.subplots(figsize=(5, 5))
     for dt in dtspace:
         print(f'dt: {round(dt, 5)}')
-        mps = MPS.make_initial_state(L, hx, hz)
+        mps = MPS.make_isotropic_state(L, np.arange(2), hx, hz)
         energy = mps.cool(dt, k)
 
         tspace = dt * np.arange(0, len(energy))
@@ -309,8 +382,8 @@ def p4_1_fix_L(dtspace, L=12, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz']):
     print(f'true energy: {gnd_eng}')
 
     axes.axhline(gnd_eng, label='Ground State Energy', color='black', linestyle='dotted')
-    axes.set_xlabel(r'Imaginary Time $\delta \tau$')
-    axes.set_ylabel('Energy')
+    axes.set_xlabel(r'Imaginary Time $\tau$')
+    axes.set_ylabel('Trial Energy')
 
     fig.legend(**utility.LEGEND_OPTIONS)
     fig.savefig(FIG_DIR + 'p4_1_gnd_eng_convergence.png', **utility.FIG_SAVE_OPTIONS)
@@ -319,15 +392,23 @@ def p4_1_fix_L(dtspace, L=12, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz']):
 def p4_1_fix_dt(Lspace, dt=0.01, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz']):
     correl_Lspace = Lspace[-5:]
 
+    ferro_eng = []
     gnd_eng = []
     correl = []
     for L in Lspace:
         print(f'L: {L}')
-        mps = MPS.make_initial_state(L, hx, hz)
-        gnd_eng.append(mps.cool(dt, k)[-1])
+        mps = MPS.make_isotropic_state(L, np.arange(2), hx, hz)
+        ferro_eng.append(mps.cool(dt, k))
+        gnd_eng.append(ferro_eng[-1][-1])
         if L in correl_Lspace:
             correl.append(mps.correlation())
     gnd_eng = np.array(gnd_eng)
+
+    neel_L = Lspace[-1]
+    print(f'Neel L: {neel_L}')
+    mps = MPS.make_neel_state(neel_L, hx, hz)
+    neel_eng = mps.cool(dt, k)
+    neel_correl = mps.correlation()
 
     bulk_eng = []
     for i in range(len(Lspace) - 1):
@@ -351,11 +432,71 @@ def p4_1_fix_dt(Lspace, dt=0.01, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz'])
     fig.legend(**utility.LEGEND_OPTIONS)
     fig.savefig(FIG_DIR + 'p4_1_correl.png', **utility.FIG_SAVE_OPTIONS)
 
+    fig, axes = plt.subplots(figsize=(5, 5))
+    ferro_tspace = dt * np.arange(len(ferro_eng[-1]))
+    neel_tspace = dt * np.arange(len(neel_eng))
+    axes.plot(ferro_tspace, ferro_eng[-1], label=rf'Ferromagnetic Initial State, $L={neel_L}$')
+    axes.plot(neel_tspace, neel_eng, label=rf'Néel Pattern Initial State, $L={neel_L}$')
+    axes.set_xlabel(r'Imaginary Time $\tau$')
+    axes.set_ylabel('Trial Energy')
+    fig.legend(**utility.LEGEND_OPTIONS)
+    fig.savefig(FIG_DIR + 'p4_1_neel_eng_comp.png', **utility.FIG_SAVE_OPTIONS)
+
+    fig, axes = plt.subplots(figsize=(5, 5))
+    axes.plot(np.arange(neel_L), correl[-1], label=rf'Ferromagnetic Initial State, $L={neel_L}$')
+    axes.plot(np.arange(neel_L), neel_correl, label=rf'Néel Pattern Initial State, $L={neel_L}$')
+    axes.set_xlabel(r'$r$')
+    axes.set_ylabel(r'$\langle \sigma_1^z \sigma_{1+r}^z \rangle$')
+    fig.legend(**utility.LEGEND_OPTIONS)
+    fig.savefig(FIG_DIR + 'p4_1_neel_correl_comp.png', **utility.FIG_SAVE_OPTIONS)
+
+
+def p4_2(L, kspace, N, dt=0.01, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz']):
+    xi = (1/2) * np.array([-np.sqrt(3), 1])
+    mps = MPS.make_isotropic_state(L, xi, hx=hx, hz=hz)
+
+    data = {}
+    for k in kspace:
+        data[k] = mps.time_trace(dt, k, N)
+
+    fig, axes = plt.subplots(2, len(kspace), sharex=True, sharey=True, figsize=(5*len(kspace), 10))
+    for idx, k in enumerate(kspace):
+        tspace = dt * np.arange(len(data[k]['sig_z_1']))
+        axes[0, idx].plot(tspace, data[k]['sig_z_1'], label=r'$j=1$')
+        axes[0, idx].plot(tspace, data[k]['sig_z_half'], label=r'$j=L/2$')
+
+        axes[1, idx].plot(tspace, data[k]['sig_x_1'], label=r'$j=1$')
+        axes[1, idx].plot(tspace, data[k]['sig_x_half'], label=r'$j=L/2$')
+
+        axes[1, idx].set_xlabel(r'Real Time $t$')
+        axes[0, idx].set_title(rf'$k={k}$')
+
+    axes[0, 0].set_ylabel(r'$\langle \sigma_j^z \rangle$')
+    axes[1, 0].set_ylabel(r'$\langle \sigma_j^x \rangle$')
+
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, **utility.LEGEND_OPTIONS)
+    fig.savefig(FIG_DIR + 'p4_2_sigma.png', **utility.FIG_SAVE_OPTIONS)
+
+    fig, axes = plt.subplots(figsize=(5, 5))
+    for idx, k, in enumerate(kspace):
+        tspace = dt * np.arange(len(data[k]['entropy']))
+        axes.plot(tspace, data[k]['entropy'], label=rf'$k={k}$')
+    axes.set_xlabel(r'Real Time $t$')
+    axes.set_ylabel(r'$S_{L/2}$')
+
+    fig.legend(**utility.LEGEND_OPTIONS)
+    fig.savefig(FIG_DIR + 'p4_2_entropy.png', **utility.FIG_SAVE_OPTIONS)
+
 
 if __name__ == '__main__':
     DTSPACE = 0.1**np.arange(1, 3)
-    LSPACE = np.arange(10, 250, 10)[:5]
+    LSPACE = np.arange(10, 260, 10)
+    KSPACE = np.array([16, 64, 128])
+    TIME_STEPS = int(1e3)
 
     # p4_1_fix_L(DTSPACE)
 
-    p4_1_fix_dt(LSPACE, k=8)
+    # p4_1_fix_dt(LSPACE)
+
+    p4_2(LSPACE[-1], KSPACE, TIME_STEPS)
