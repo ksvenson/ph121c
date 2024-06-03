@@ -7,7 +7,7 @@ FIG_DIR = './figs/'
 CACHE_DIR = './data/'
 
 FIELD_VALS = {'hx': -1.05, 'hz': 0.5}
-TOL = 1e-1
+TOL = 1e-3
 
 
 @utility.cache('npy', CACHE_DIR + 'l4_dense_H')
@@ -101,8 +101,6 @@ class MPS:
         mps = cls(L, A_list, L-1, hx, hz)
         if ortho_center is not None:
             mps.move_ortho_center(ortho_center)
-            # for _ in range(L - ortho_center - 1):
-            #     mps.shift_ortho_center(k=k, left=True)
         return mps
 
     @classmethod
@@ -165,14 +163,26 @@ class MPS:
         np.savez(CACHE_DIR + note + '.npz')
 
     def norm(self):
+        return self.dot(self)
+        # A = self.A_list[0]
+        # A_dag = np.transpose(A, axes=(0, 2, 1)).conj()
+        # contract = np.einsum('abc,acd->bd', A_dag, A)
+        # for j in range(1, self.L):
+        #     A = self.A_list[j]
+        #     A_dag = np.transpose(A, axes=(0, 2, 1)).conj()
+        #     contract = np.einsum('abc,cd,ade->be', A_dag, contract, A)
+        # return np.trace(contract)
+
+    def dot(self, other):
         A = self.A_list[0]
-        A_dag = np.transpose(A, axes=(0, 2, 1)).conj()
+        A_dag = np.transpose(other.A_list[0], axes=(0, 2, 1)).conj()
         contract = np.einsum('abc,acd->bd', A_dag, A)
         for j in range(1, self.L):
             A = self.A_list[j]
-            A_dag = np.transpose(A, axes=(0, 2, 1)).conj()
+            A_dag = np.transpose(other.A_list[j], axes=(0, 2, 1)).conj()
             contract = np.einsum('abc,cd,ade->be', A_dag, contract, A)
         return np.trace(contract)
+
 
     def renormalize(self):
         # We renormalize at the orthogonality center so that we maintain the canonical form
@@ -366,6 +376,11 @@ class MPS:
         return data
 
 
+@utility.cache('pkl', CACHE_DIR + 'real_time_trace')
+def do_real_time_trace(mps, dt, k, N, note=None):
+    return mps.time_trace(dt, k, N)
+
+
 def p4_1_fix_L(dtspace, L=12, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz']):
     eigs = dense_eigs(L, hx, hz, note=f'L{L}_hx{hx}_hz{hz}')
     gnd_eng = eigs['evals'][0]
@@ -457,7 +472,8 @@ def p4_2(L, kspace, N, dt=0.01, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz']):
 
     data = {}
     for k in kspace:
-        data[k] = mps.time_trace(dt, k, N)
+        print(f'k: {k}')
+        data[k] = do_real_time_trace(mps, dt, k, N, note=f'dt{dt}_k{k}')
 
     fig, axes = plt.subplots(2, len(kspace), sharex=True, sharey=True, figsize=(5*len(kspace), 10))
     for idx, k in enumerate(kspace):
@@ -489,14 +505,62 @@ def p4_2(L, kspace, N, dt=0.01, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz']):
     fig.savefig(FIG_DIR + 'p4_2_entropy.png', **utility.FIG_SAVE_OPTIONS)
 
 
+def p4_3_2(L, N, dt=0.01, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz'], ising_hx=2, ising_hz=0):
+    data = {}
+    for ising in range(2):
+        if ising:
+            gnd_state = MPS.make_isotropic_state(L, np.arange(2), hx, hz)
+        else:
+            gnd_state = MPS.make_isotropic_state(L, np.arange(2), ising_hx, ising_hz)
+
+        trial_eng = gnd_state.cool(dt, k)
+        gnd_eng = trial_eng[-1]
+
+        A_list_copy = [A.copy() for A in gnd_state.A_list]
+        A = gnd_state.A_list[L // 2]
+        new_A = {
+            'x': np.array([A[1], A[0]]),
+            'y': np.array([-1j * A[1], 1j * A[0]]),
+            'z': np.array([A[0], -1 * A[1]])
+        }
+
+        data[ising] = {}
+        norm = gnd_state.norm()
+        for dir in new_A:
+            data[ising][dir] = [norm]
+
+        mps = MPS(gnd_state.L, A_list_copy, gnd_state.ortho_center, gnd_state.hx, gnd_state.hz)
+        for dir, op in new_A.items():
+            mps.A_list[L // 2] = op
+            for i in range(N):
+                mps.real_evolve(dt)
+                data[ising][dir].append(np.exp(-1j * dt * (i+1) * gnd_eng) * mps.dot(gnd_state))
+
+    fig, axes = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
+    for ising in data:
+        for idx, dir in enumerate(data[ising]):
+            tspace = dt * np.arange(len(data[ising][dir]))
+            if ising:
+                label = rf'$h_x = {ising_hx}, h_z = {ising_hz}$'
+            else:
+                label = rf'$h_x = {hx}, h_z = {hz}$'
+            axes[idx].plot(tspace, data[ising][dir], label=label)
+            axes[idx].set_title(rf'$\mu = {dir}$')
+            axes[idx].set_xlabel(r'Real Time $t$')
+    axes[0].set_ylabel(r'$C^{\mu\mu}_{L/2, L/2}(t)$')
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, **utility.LEGEND_OPTIONS)
+    fig.savefig(FIG_DIR + 'p4_3_2.png', **utility.FIG_SAVE_OPTIONS)
+
+
 if __name__ == '__main__':
-    DTSPACE = 0.1**np.arange(1, 3)
+    DTSPACE = np.array([0.1, 0.01, 0.001])
     LSPACE = np.arange(10, 260, 10)
     KSPACE = np.array([16, 64, 128])
     TIME_STEPS = int(1e3)
 
-    # p4_1_fix_L(DTSPACE)
+    p4_1_fix_L(DTSPACE)
 
-    # p4_1_fix_dt(LSPACE)
+    p4_1_fix_dt(LSPACE)
 
-    p4_2(LSPACE[-1], KSPACE, TIME_STEPS)
+    # p4_2(LSPACE[-1], KSPACE, TIME_STEPS)
