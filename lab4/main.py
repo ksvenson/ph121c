@@ -69,7 +69,14 @@ class MPS:
         W = np.moveaxis(W, (0, 1, 2, 3), (1, 2, 0, 3))
         W = W.reshape(W.shape[0] * W.shape[1], W.shape[2] * W.shape[3])
 
-        U, s, Vh = np.linalg.svd(W, full_matrices=False)
+        try:
+            U, s, Vh = np.linalg.svd(W, full_matrices=False)
+        except np.linalg.LinAlgError as err:
+            print(err)
+            print(f'nan: {np.sum(np.isnan(W))}')
+            np.save('W_err.npy', W)
+            quit()
+
         if k is not None:
             U = U[:, :k]
             s = s[:k]
@@ -183,10 +190,19 @@ class MPS:
             contract = np.einsum('abc,cd,ade->be', A_dag, contract, A)
         return np.trace(contract)
 
-
     def renormalize(self):
         # We renormalize at the orthogonality center so that we maintain the canonical form
-        self.A_list[self.ortho_center] /= np.sqrt(self.norm())
+        self.A_list[self.ortho_center] = self.A_list[self.ortho_center] / np.sqrt(self.norm())
+
+    def get_state(self):
+        output_state = []
+        for state in range(2**self.L):
+            prod = self.A_list[0][(state >> (self.L-1)) & 1].reshape(2)
+            for j in range(1, self.L):
+                prod = np.einsum('a,ab->b', prod, self.A_list[j][(state >> (self.L-1-j)) & 1])
+            # Prod should only have one element
+            output_state.append(prod[0])
+        return np.array(output_state)
 
     def __apply_field(self, dt):
         mag = np.sqrt(self.hx**2 + self.hz**2)
@@ -205,7 +221,7 @@ class MPS:
             W = np.einsum('ab,abcd->abcd', exp_xor, W)
             self.A_list[j], self.A_list[j+1] = self.__class__.__svd_W(W, left=False)
 
-    def __restore_canonical(self):
+    def restore_canonical(self):
         self.ortho_center = 0
         # self.sweep(k=None, left=False)
         self.move_ortho_center(self.L-1, k=None)
@@ -244,10 +260,19 @@ class MPS:
             self.shift_ortho_center(k=k, left=left)
 
     def imag_evolve(self, dt):
+        self.save('before_field')
         self.__apply_field(dt)
+
+        self.save('before_two_site_0')
         self.__apply_two_site(dt, 0)
+
+        self.save('before_two_site_1')
         self.__apply_two_site(dt, 1)
-        self.__restore_canonical()
+
+        self.save('before_restore_canonical')
+        self.restore_canonical()
+
+        self.save('after_restore_canonical')
 
     def measure_energy(self, k=None):
         assert self.ortho_center == 0 or self.ortho_center == self.L - 1
@@ -310,8 +335,9 @@ class MPS:
         sig_A_dag = np.transpose(self.A_list[0], axes=(0, 2, 1)).conj()
         # Applying the sigma_z operator:
         sig_A_dag[0] *= -1
-        contract = np.einsum('abc,acd->bd', sig_A_dag, self.A_list[0])
-        correl = [np.trace(contract)]
+        contract = np.einsum('abc,acd->abd', sig_A_dag, self.A_list[0])
+        correl = [np.sum(np.diag(-1 * contract[0]) + np.diag(contract[1]))]
+        contract = np.sum(contract, axis=0)
         for r in range(1, self.L):
             A_r = self.A_list[r]
             A_r_dag = np.transpose(A_r, axes=(0, 2, 1)).conj()
@@ -338,10 +364,13 @@ class MPS:
         A_dag = A_dag[::-1]
         return np.einsum('abc,acb->', A_dag, A)
 
-    def measure_entropy(self):
+    def get_schmidt_vals(self):
+        assert self.ortho_center != self.L-1
         W = np.einsum('abc,dce->adbe', self.A_list[self.ortho_center], self.A_list[self.ortho_center+1])
-        schmidt_vals = self.__class__.__svd_W(W, return_s=True)
-        probs = schmidt_vals**2
+        return self.__class__.__svd_W(W, return_s=True)
+
+    def measure_entropy(self):
+        probs = self.get_schmidt_vals()**2
         return -1 * np.sum(probs * np.log(probs))
 
     def time_trace(self, dt, k, N):
@@ -468,11 +497,11 @@ def p4_1_fix_dt(Lspace, dt=0.01, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz'])
 
 def p4_2(L, kspace, N, dt=0.01, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz']):
     xi = (1/2) * np.array([-np.sqrt(3), 1])
-    mps = MPS.make_isotropic_state(L, xi, hx=hx, hz=hz)
 
     data = {}
     for k in kspace:
         print(f'k: {k}')
+        mps = MPS.make_isotropic_state(L, xi, hx=hx, hz=hz)
         data[k] = do_real_time_trace(mps, dt, k, N, note=f'dt{dt}_k{k}')
 
     fig, axes = plt.subplots(2, len(kspace), sharex=True, sharey=True, figsize=(5*len(kspace), 10))
@@ -516,7 +545,6 @@ def p4_3_2(L, N, dt=0.01, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz'], ising_
         trial_eng = gnd_state.cool(dt, k)
         gnd_eng = trial_eng[-1]
 
-        A_list_copy = [A.copy() for A in gnd_state.A_list]
         A = gnd_state.A_list[L // 2]
         new_A = {
             'x': np.array([A[1], A[0]]),
@@ -529,10 +557,12 @@ def p4_3_2(L, N, dt=0.01, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz'], ising_
         for dir in new_A:
             data[ising][dir] = [norm]
 
-        mps = MPS(gnd_state.L, A_list_copy, gnd_state.ortho_center, gnd_state.hx, gnd_state.hz)
         for dir, op in new_A.items():
+            A_list_copy = [A.copy() for A in gnd_state.A_list]
+            mps = MPS(gnd_state.L, A_list_copy, gnd_state.ortho_center, gnd_state.hx, gnd_state.hz)
             mps.A_list[L // 2] = op
             for i in range(N):
+                print(f'Time trace {ising} {dir} step {i} of {N}')
                 mps.real_evolve(dt)
                 data[ising][dir].append(np.exp(-1j * dt * (i+1) * gnd_eng) * mps.dot(gnd_state))
 
@@ -556,11 +586,13 @@ def p4_3_2(L, N, dt=0.01, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz'], ising_
 if __name__ == '__main__':
     DTSPACE = np.array([0.1, 0.01, 0.001])
     LSPACE = np.arange(10, 260, 10)
-    KSPACE = np.array([16, 64, 128])
+    KSPACE = np.array([8, 16, 32, 64])
     TIME_STEPS = int(1e3)
 
-    p4_1_fix_L(DTSPACE)
+    # p4_1_fix_L(DTSPACE)
 
-    p4_1_fix_dt(LSPACE)
+    # p4_1_fix_dt(LSPACE)
 
-    # p4_2(LSPACE[-1], KSPACE, TIME_STEPS)
+    p4_2(30, KSPACE, int(1e3))
+
+    # p4_3_2(20, 50)

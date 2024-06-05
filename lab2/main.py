@@ -6,6 +6,7 @@ import os
 
 import utility
 from lab1 import main as l1main
+from lab4 import main as l4main
 from typing import Literal
 
 
@@ -17,7 +18,7 @@ FIGS_DIR = './figs/'
 EIGS_DIR = '../lab1/data/'
 
 HSPACE = np.linspace(0, 2, 17)
-LSPACE = np.arange(5, 14)
+LSPACE = np.arange(5, 21)
 DENSE_LSPACE = np.arange(8, 13, 2)
 
 LEGEND_OPTIONS = {'bbox_to_anchor': (0.9, 0.5), 'loc': 'center left'}
@@ -172,6 +173,37 @@ def mps_eng(A1, A, AL, L, h_J):
         total += -1 * h_J * mps_sigx(A1, A, AL, L, spin_idx)
     total += -1 * h_J * mps_sigx(A1, A, AL, L, L-1)
     return total / mps_norm(A1, A, AL, L)
+
+
+def compute_s_vals(L, A1, A, AL, num=2):
+    A_list = [A1]
+    for _ in range(L - 2):
+        A_list.append(A.copy())
+    A_list.append(AL)
+
+    mps = l4main.MPS(L, A_list, 0, 0, 0)
+    mps.renormalize()
+    mps.restore_canonical()
+    mps.move_ortho_center(0)
+    state = mps.get_state()
+    brute_s_vals = []
+    mps_s_vals = []
+    for l in range(1, L):
+        M = state.reshape(2**l, 2**(L - l))
+        U, s, Vh = np.linalg.svd(M, full_matrices=False)
+        brute_s_vals.append(s[:num])
+
+        mps_s_vals.append(mps.get_schmidt_vals()[:num])
+        mps.shift_ortho_center(left=False)
+
+    return brute_s_vals, mps_s_vals
+
+
+def print_s_vals(s_vals, fname):
+    with open(fname, 'w') as f:
+        print(f'First Schmidt Value: {[round(arr[0], 5) for arr in s_vals]}', file=f)
+        print(f'Second Schmidt Value: {[round(arr[1], 5) for arr in s_vals]}', file=f)
+        print(f'Third Schmidt Value: {[round(arr[2], 5) for arr in s_vals if len(arr) >= 3]}', file=f)
 
 
 def p5_1():
@@ -338,6 +370,8 @@ def p5_3():
             axes[phase_idx].plot(dk, np.abs(evals[PHASE_H[phase]] - trun_eng), label=rf'$L={L}$')
             axes[phase_idx].set_title(phase + rf': $h/J={HSPACE[PHASE_H[phase]]}$')
             axes[phase_idx].set_xlabel(rf'$d(k)$')
+            axes[phase_idx].set_xscale('log')
+            axes[phase_idx].set_yscale('log')
 
     axes_dk[0].set_ylabel('$d(k)$')
     axes_de[0].set_ylabel('$\Delta E$')
@@ -448,13 +482,115 @@ def p5_5():
         figs[key].savefig(FIGS_DIR + f'p5_5_mps_{key}.png', **FIG_SAVE_OPTIONS)
 
 
+def p5_5_1():
+    bdry = 'open'
+
+    fig_eng, axes_eng = plt.subplots(1, 2, sharey=True, sharex=True, figsize=(10, 5))
+    fig_diff, axes_diff = plt.subplots(1, 2, sharey=True, sharex=True, figsize=(10, 5))
+    fig_correl, axes_correl = plt.subplots(1, 2, sharey=True, sharex=True, figsize=(10, 5))
+    for phase_idx, phase in enumerate(MPS_H):
+        for color, L in enumerate(LSPACE):
+            print(f'L: {L}')
+            eigs = np.load(EIGS_DIR + f'sparse_eigs_{bdry}_L{L}.npz')
+            gnd_state = eigs['evecs'][MPS_H[phase]][:, 0]
+            gnd_eng = eigs['evals'][MPS_H[phase]][0]
+            kspace = 2**np.arange(0, L//2)
+
+            eng = []
+            for k in kspace:
+                mps = l4main.MPS.make_from_state(gnd_state, L, k, hx=HSPACE[MPS_H[phase]], hz=0, ortho_center=0)
+                if L == LSPACE[-1]:
+                    axes_correl[phase_idx].plot(np.arange(L), mps.correlation(), label=rf'$k={k}$')
+                eng.append(mps.measure_energy() / mps.norm())
+            eng = np.array(eng)
+
+            axes_eng[phase_idx].plot(kspace, eng, label=rf'$L={L}$', color=f'C{color}')
+            axes_eng[phase_idx].axhline(gnd_eng, color=f'C{color}', linestyle='dotted')
+
+            axes_diff[phase_idx].plot(kspace, np.abs(eng - gnd_eng), label=rf'$L={L}$', color=f'C{color}')
+
+        title_help = HSPACE[MPS_H[phase]]
+        axes_eng[phase_idx].set_title(rf'$h/J={title_help}$')
+        axes_eng[phase_idx].set_xlabel(r'$k$')
+        axes_eng[phase_idx].set_xscale('log')
+
+        axes_diff[phase_idx].set_title(rf'$h/J={title_help}$')
+        axes_diff[phase_idx].set_xlabel(r'$k$')
+        axes_diff[phase_idx].set_xscale('log')
+        axes_diff[phase_idx].set_yscale('log')
+
+        axes_correl[phase_idx].set_title(rf'$h/J={title_help}$')
+        axes_correl[phase_idx].set_xlabel(r'$r$')
+
+    axes_eng[0].set_ylabel('Ground State Energy')
+    handles, labels = axes_eng[0].get_legend_handles_labels()
+    fig_eng.legend(handles, labels, **LEGEND_OPTIONS)
+    fig_eng.savefig(FIGS_DIR + f'p5_5_1_mps_eng.png', **FIG_SAVE_OPTIONS)
+
+    axes_diff[0].set_ylabel('Ground State Energy Difference')
+    handles, labels = axes_diff[0].get_legend_handles_labels()
+    fig_diff.legend(handles, labels, **LEGEND_OPTIONS)
+    fig_diff.savefig(FIGS_DIR + f'p5_5_1_mps_eng_diff.png', **FIG_SAVE_OPTIONS)
+
+    axes_correl[0].set_ylabel(r'$\langle \sigma_1^z \sigma_{1+r}^z \rangle$')
+    handles, labels = axes_correl[0].get_legend_handles_labels()
+    fig_correl.legend(handles, labels, **LEGEND_OPTIONS)
+    fig_correl.savefig(FIGS_DIR + f'p5_5_1_mps_correl.png', **FIG_SAVE_OPTIONS)
+
+
+def p5_5_2():
+    L = 10
+    A1 = (1/np.sqrt(2)) * np.array([1, -1, 1, 1]).reshape(2, 1, 2)
+    A = (1/np.sqrt(2)) * np.array([0, 0, 1, -1, 1, 1, 0, 0]).reshape(2, 2, 2)
+    AL = np.array([0, 1, 1, 0]).reshape(2, 2, 1)
+
+    brute_s_vals, mps_s_vals = compute_s_vals(L, A1, A, AL)
+    print_s_vals(brute_s_vals, 'p5_5_2_svals_first.txt')
+
+    L = 20
+    A1 = np.array([2, -1, 1, 2]).reshape(2, 1, 2)
+    AL = np.array([3, 1, 1, 3]).reshape(2, 2, 1)
+
+    brute_s_vals, mps_s_vals = compute_s_vals(L, A1, A, AL, num=2)
+    brute_s_vals = np.array(brute_s_vals)
+    mps_s_vals = np.array(mps_s_vals)
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+    axes[0].plot(1 + np.arange(len(brute_s_vals)), brute_s_vals[:, 0], label='First Schmidt Value')
+    axes[0].plot(1 + np.arange(len(brute_s_vals)), brute_s_vals[:, 1], label='Second Schmidt Value')
+    axes[0].set_title('Brute Force Schmidt Values')
+    axes[0].set_xlabel(r'$\ell$')
+
+    axes[1].plot(1 + np.arange(len(mps_s_vals)), mps_s_vals[:, 0], label='First Schmidt Value')
+    axes[1].plot(1 + np.arange(len(mps_s_vals)), mps_s_vals[:, 1], label='Second Schmidt Value')
+    axes[1].set_title('MPS Schmidt Values')
+    axes[1].set_xlabel(r'$\ell$')
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, **LEGEND_OPTIONS)
+    fig.savefig(FIGS_DIR + 'p5_5_2_s_vals.png', **FIG_SAVE_OPTIONS)
+
+    fig, axes = plt.subplots(figsize=(5, 5))
+    axes.plot(1 + np.arange(len(brute_s_vals)), np.abs(brute_s_vals[:, 0] - mps_s_vals[:, 0]), label='First Schmidt Value')
+    axes.plot(1 + np.arange(len(brute_s_vals)), np.abs(brute_s_vals[:, 1] - mps_s_vals[:, 1]), label='Second Schmidt Value')
+    axes.set_xlabel(r'$\ell$')
+    axes.set_ylabel('Difference')
+    axes.set_yscale('log')
+    fig.legend(**LEGEND_OPTIONS)
+    fig.savefig(FIGS_DIR + 'p5_5_2_s_vals_diff.png', **FIG_SAVE_OPTIONS)
+
+
 if __name__ == '__main__':
-    # p5_1()
+    p5_1()
 
-    # p5_2()
+    p5_2()
 
-    # p5_3()
+    p5_3()
 
-    # p5_4()
+    p5_4()
 
     p5_5()
+
+    p5_5_1()
+
+    p5_5_2()
