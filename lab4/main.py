@@ -422,7 +422,7 @@ def cache_p4_3_2(L, N, dt=0.01, k=16, hx=FIELD_VALS['hx'], hz=FIELD_VALS['hz'], 
                 mps.real_evolve(dt)
                 mps.move_ortho_center(0, k=k)
                 mps.renormalize()
-                data[ising][dir].append(np.exp(-1j * dt * (i+1) * gnd_eng) * mps.dot(mod_gnd_state))
+                data[ising][dir].append(np.exp(1j * dt * (i+1) * gnd_eng) * mps.dot(mod_gnd_state))
 
     return data
 
@@ -577,10 +577,10 @@ if __name__ == '__main__':
     KSPACE = np.array([8, 16, 32])
     TIME_STEPS = int(1e3)
 
-    p4_1_fix_L(DTSPACE)
+    # p4_1_fix_L(DTSPACE)
+    #
+    # p4_1_fix_dt(LSPACE)
+    #
+    # p4_2(LSPACE[-1], KSPACE, TIME_STEPS)
 
-    p4_1_fix_dt(LSPACE)
-
-    p4_2(250, KSPACE, int(1e3))
-
-    p4_3_2(100, 50)
+    p4_3_2(LSPACE[-1], TIME_STEPS)

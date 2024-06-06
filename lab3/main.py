@@ -71,14 +71,26 @@ def make_scar_H(L, Omega, note=None):
         # 1/4 term in P_{j, j+1}
         H[i, i] += (1/4) * (2 * i.bit_count() - L)
 
-        # sigma_x term in P_{j, j+1}
-        for j in range(L-2):
-            flipped_state = i ^ (0b11 << j)
+        # sigma_x and sigma_y terms in P_{j, j+1}
+        for j in range(1, L-1):
+            new_state = i ^ (0b11 << j)
+            j_bit = 2 * ((i >> (j+1)) & 1) - 1
+            j1_bit = 2 * ((i >> j) & 1) - 1
+            j2_bit = 2 * ((i >> (j-1)) & 1) - 1
+            H[new_state, i] += (-1/4) * j2_bit * (1 + (-1) * j_bit * j1_bit)
+
+        j_bit = 2 * ((i >> 1) & 1) - 1
+        j1_bit = 2 * (i & 1) - 1
+        j2_bit = 2 * ((i >> (L-1)) & 1) - 1
+        H[i ^ 0b11, i] += (-1/4) * j2_bit * (1 + (-1) * j_bit * j1_bit)
+
+        j_bit = 2 * (i & 1) - 1
+        j1_bit = 2 * ((i >> (L-1)) & 1) - 1
+        j2_bit = 2 * ((i >> (L-2)) & 1) - 1
+        H[i ^ 0b1 ^ (1 << (L-1)), i] += (-1/4) * j2_bit * (1 + (-1) * j_bit * j1_bit)
 
         # sigma_z term in P_{j, j+1}
         H[i, i] += (1/4) * (2 * (i ^ cycle_bits(i, L, 1) ^ cycle_bits(i, L, 2)).bit_count() - L)
-
-
 
 
 @utility.cache('npz', CACHE_DIR + 'l3_dense_eigs')
