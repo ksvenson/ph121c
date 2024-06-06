@@ -195,13 +195,14 @@ def do_ham_analysis(prob, W=None):
     data = {}
     for color_idx, L in enumerate(LSPACE):
         print(f'L={L}')
-        data[L] = {
-            'sigma': {},
-            'entropy': {}
-        }
         eigs = dense_eigs(L, W=W, note=f'{prob}_L{L}')
         evals = eigs['evals']
         evecs = eigs['evecs']
+        data[L] = {
+            'sigma': {},
+            'entropy': {},
+            'evals': evals
+        }
 
         xi_state = make_prod_state(L, 1/2, -np.sqrt(3)/2)
         # convert xi state to diagonal basis
@@ -228,6 +229,11 @@ def do_ham_analysis(prob, W=None):
 
             O_thermal = np.sum(np.diag(global_op) * np.exp(-1 * xi_beta * evals)) / Z_beta[xi_beta_idx]
             data[L]['sigma'][f'{op}_thermal'] = O_thermal
+
+            global_op = globalize_op(L, ops[op])
+            data[L]['sigma'][f'eig_{op}'] = np.sum(evecs.conj() * (global_op @ evecs), axis=0)
+
+        data[L]['eig_entropy'] = l2main.get_entropy(evecs.T, L//2, note=f'{prob}_L{L}_eig_entropy')
 
         # Entropy calculations
         my_state = make_prod_state(L, -1/np.sqrt(2), 1/np.sqrt(2))
@@ -339,7 +345,10 @@ def p4_3_1():
             print(f'Trial {trial}')
             prob = f'p4_3_1_W{W}_trial{trial}'
             data.append(do_ham_analysis(prob, W=W))
-            plot_ham_analysis(prob, data[-1])
+        plot_ham_analysis(f'p4_3_1_W{W}_trial0', data[0])
+
+        fig_expval, axes_expval = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(15, 5))
+        fig_entropy, axes_entropy = plt.subplots(figsize=(10, 5))
         avg = {}
         for L in data[0]:
             avg[L] = {
@@ -354,6 +363,27 @@ def p4_3_1():
 
             for tag in data[0][L]['entropy']:
                 avg[L]['entropy'][tag] = np.mean([data[i][L]['entropy'][tag] for i in trials], axis=0)
+
+            evals = np.mean([data[i][L]['evals'] for i in trials], axis=0)
+            for op_idx, op in enumerate(ops):
+                sigma_expvals = np.mean([data[i][L]['sigma'][f'eig_{op}'] for i in trials], axis=0)
+                axes_expval[op_idx].plot(evals/L, sigma_expvals, label=rf'$L={L}$')
+                axes_expval[op_idx].set_xlabel(r'$\varepsilon_n / L$')
+                axes_expval[op_idx].set_title(rf'$\mu={op}$')
+
+            entropy = np.mean([data[i][L]['eig_entropy'] for i in trials], axis=0)
+            axes_entropy.plot(evals / L, entropy/L, label=rf'$L={L}$')
+            axes_entropy.set_xlabel(r'$\varepsilon_n / L$')
+
+        axes_expval[0].set_ylabel(r'$\langle \sigma_1^\mu \rangle_n$')
+        handles, labels = axes_expval[0].get_legend_handles_labels()
+        fig_expval.legend(handles, labels, **LEGEND_OPTIONS)
+        fig_expval.savefig(FIGS_DIR + f'p4_3_1_W{W}_eig_sigma_expval.png', **FIG_SAVE_OPTIONS)
+
+        axes_entropy.set_ylabel(r'$S_{L/2} / L$')
+        handles, labels = axes_entropy.get_legend_handles_labels()
+        fig_entropy.legend(handles, labels, **LEGEND_OPTIONS)
+        fig_entropy.savefig(FIGS_DIR + f'p4_3_1_W{W}_eig_entropy.png', **FIG_SAVE_OPTIONS)
 
         plot_ham_analysis(f'p4_3_1_W{W}_avg', avg)
 
