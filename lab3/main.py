@@ -90,7 +90,8 @@ def make_scar_H(L, Omega, note=None):
         H[i ^ 0b1 ^ (1 << (L-1)), i] += (-1/4) * j2_bit * (1 + (-1) * j_bit * j1_bit)
 
         # sigma_z term in P_{j, j+1}
-        H[i, i] += (1/4) * (2 * (i ^ cycle_bits(i, L, 1) ^ cycle_bits(i, L, 2)).bit_count() - L)
+        H[i, i] += (-1/4) * (2 * (i ^ cycle_bits(i, L, 1) ^ cycle_bits(i, L, 2)).bit_count() - L)
+    return H
 
 
 @utility.cache('npz', CACHE_DIR + 'l3_dense_eigs')
@@ -103,6 +104,21 @@ def dense_eigs(L, W=None, note=None):
     """
     print(f'finding dense evals: L={L}')
     H = make_dense_H(L, W=W, note=note)
+    evals, evecs = sp.linalg.eigh(H)
+    return {'evals': evals, 'evecs': evecs}
+
+
+@utility.cache('npz', CACHE_DIR + 'l3_scar_eigs')
+def scar_eigs(L, Omega, note=None):
+    """
+    Diagonalizes Hamiltonian from `make_scar_H`.
+    :param L: System size.
+    :param Omega: Parameter in Equation 12.
+    :param note: Appended to filename when caching function output.
+    :return: As a dict: list of evals, matrix with evecs as columns.
+    """
+    print(f'finding scar eigs: L={L}')
+    H = make_scar_H(L, Omega, note=note)
     evals, evecs = sp.linalg.eigh(H)
     return {'evals': evals, 'evecs': evecs}
 
@@ -397,7 +413,7 @@ def p4_3_1():
         trials = np.arange(10)
         for trial in trials:
             print(f'Trial {trial}')
-            prob = f'p4_2_1_W{W}_trial{trial}'
+            prob = f'p4_3_1_W{W}_trial{trial}'
             data.append(do_ham_analysis(prob, W=W))
             plot_ham_analysis(prob, data[-1])
         avg = {}
@@ -418,11 +434,34 @@ def p4_3_1():
         plot_ham_analysis(f'p4_2_1_W{W}_avg', avg)
 
 
-def testing():
-    L = 8
-    no_W = make_dense_H(L, W=None)
-    with_W = make_dense_H(L, W=0)
-    print(f'Error: {np.linalg.norm(no_W - with_W)}')
+def p4_3_2(Omega=1):
+    fig_entropy, axes_entropy = plt.subplots(figsize=(10, 5))
+    for color, L in enumerate(LSPACE):
+        print(f'L={L}')
+        eigs = scar_eigs(L, Omega, note=f'L{L}_Omega{Omega}')
+        evals = eigs['evals']
+        evecs = eigs['evecs']
+
+        entropy = l2main.get_entropy(evecs.T, L//2, note=f'p4_3_2_entropy_L{L}_Omega{Omega}')
+
+        axes_entropy.plot(evals, entropy, label=rf'$L={L}$')
+        scar_space = Omega * (np.arange(L + 1) - (L/2))
+        if L == np.max(LSPACE):
+            axes_entropy.arrow(scar_space[0], -1, 0, 0.8, width=0.05, length_includes_head=True, label='Scar State', color='black')
+            for scar in scar_space[1:]:
+                axes_entropy.arrow(scar, -1, 0, 0.8, width=0.05, length_includes_head=True, color=f'black')
+
+        # if L == np.max(LSPACE):
+        #     axes_entropy.vlines(x=scar_space[0], ymin=-1, ymax=0, label=rf'Scar State $L={L}$', color='black', linestyle='dotted')
+        #     for scar in scar_space[1:]:
+        #         axes_entropy.vlines(x=scar, ymin=-1, ymax=0, color=f'black', linestyle='dotted')
+
+        axes_entropy.set_xlabel(r'$\varepsilon_n$')
+
+    axes_entropy.set_ylabel(r'$S_{L/2}$')
+    handles, labels = axes_entropy.get_legend_handles_labels()
+    fig_entropy.legend(handles, labels, **LEGEND_OPTIONS)
+    fig_entropy.savefig(FIGS_DIR + 'p4_3_2.png', **FIG_SAVE_OPTIONS)
 
 
 if __name__ == '__main__':
@@ -432,7 +471,6 @@ if __name__ == '__main__':
 
     # p4_2_12()
 
-    p4_3_1()
+    # p4_3_1()
 
-    # testing()
-
+    p4_3_2()
