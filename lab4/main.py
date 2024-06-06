@@ -577,10 +577,10 @@ if __name__ == '__main__':
     KSPACE = np.array([8, 16, 32])
     TIME_STEPS = int(1e3)
 
-    # p4_1_fix_L(DTSPACE)
-    #
-    # p4_1_fix_dt(LSPACE)
-    #
-    # p4_2(LSPACE[-1], KSPACE, TIME_STEPS)
+    p4_1_fix_L(DTSPACE)
+
+    p4_1_fix_dt(LSPACE)
+
+    p4_2(LSPACE[-1], KSPACE, TIME_STEPS)
 
     p4_3_2(LSPACE[-1], TIME_STEPS)
